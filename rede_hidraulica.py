@@ -37,9 +37,6 @@ class RedeHidraulica:
         self.p = np.linalg.solve(Atilde, b)
         return self.p
 
-    def calcular_potencia(self):
-        # A FAZER: Implementar cálculo de potência hidráulica
-        pass
 
 if __main__.__name__ == "__main__":
     # Exemplo de uso, seja feliz!
