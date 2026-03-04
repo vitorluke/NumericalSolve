@@ -1,57 +1,148 @@
-import __main__
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 class RedeHidraulica:
-    def __init__(self, n_nos, conectividade, condutancias):
+    def __init__(self, n_nos, conectividade, condutancias, coordenadas=None):
         self.n_nos = n_nos
-        self.conec = np.array(conectividade)
+        # Armazenamos a conectividade em base 0 internamente para facilitar o plot
+        self.conec = np.array(conectividade) - 1 
         self.C = np.array(condutancias)
+        self.Xno = np.array(coordenadas) if coordenadas is not None else None
         self.A = np.zeros((n_nos, n_nos))
         self.p = None
+        self.q = None
 
     def assembly(self):
-        """Monta a matriz global A a partir das matrizes locais."""
-        for k, (i, j) in enumerate(self.conec):
-            idx_i, idx_j = i-1, j-1 
+        """Monta a matriz global A acumulando as matrizes locais de cada cano[cite: 357, 358]."""
+        self.A = np.zeros((self.n_nos, self.n_nos))
+        for k, (idx_i, idx_j) in enumerate(self.conec):
             ck = self.C[k]
-            
-            # Matriz local contribuindo para a global
             self.A[idx_i, idx_i] += ck
             self.A[idx_j, idx_j] += ck
             self.A[idx_i, idx_j] -= ck
             self.A[idx_j, idx_i] -= ck
 
     def resolver(self, no_atm, no_bomba, q_bomba):
-        """Aplica condições de contorno e resolve Ax = b."""
+        """Resolve o sistema linear modificando a linha do nó atmosférico[cite: 217, 492]."""
         Atilde = self.A.copy()
         b = np.zeros(self.n_nos)
         
-        # Pressão fixada (ex: p_atm = 0)
+        # Condição de contorno: Pressão fixada (p_atm = 0) [cite: 150]
         idx_atm = no_atm - 1
         Atilde[idx_atm, :] = 0
         Atilde[idx_atm, idx_atm] = 1
         
-        # Vazão da bomba
+        # Fonte: Vazão da bomba injetada no nó nB [cite: 152, 217]
         b[no_bomba - 1] = q_bomba
         
         self.p = np.linalg.solve(Atilde, b)
+        self.calcular_vazoes()
         return self.p
 
+    def calcular_vazoes(self):
+        """Calcula as vazões nos canos usando a fórmula Q = K * D * p[cite: 506]."""
+        nc = len(self.conec)
+        # Matriz de incidência D [cite: 510, 513]
+        D = np.zeros((nc, self.n_nos))
+        for k, (i, j) in enumerate(self.conec):
+            D[k, i] = 1
+            D[k, j] = -1
+        
+        # Matriz diagonal de condutâncias K [cite: 507, 509]
+        K = np.diag(self.C)
+        self.q = K @ D @ self.p
+        return self.q
 
-if __main__.__name__ == "__main__":
-    # Exemplo de uso, seja feliz!
-    # C.I: Pressão no nó 1 é atmosférica (0), bomba no nó 4 com vazão de 5 unidades.
-    n_nos = 4
-    conectividade = [(1, 2), (2, 3), (3, 4)]
-    condutancias = [10, 20, 30]
-    no_atm = 1
-    no_bomba = 4
-    q_bomba = 5
+    def plotaRede(self, save_path=None):
+        """Funcionalidade de visualização adaptada do código do professor."""
+        if self.p is None or self.q is None:
+            print("Erro: Resolva a rede antes de plotar.")
+            return
+
+        coord = self.Xno
+        if coord is None:
+            print("Erro: Coordenadas dos nós não fornecidas no construtor.")
+            return
+
+        edges = self.conec
+        p = self.p
+        q = self.q
+        nv = self.n_nos
+
+        segs = []
+        mids = []
+        for (i, j) in edges:
+            x1, y1 = coord[i, 0], coord[i, 1]
+            x2, y2 = coord[j, 0], coord[j, 1]
+            segs.append(((x1, y1), (x2, y2)))
+            mids.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+
+        segs = np.array(segs)
+        mids = np.array(mids)
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        cmap = plt.get_cmap("coolwarm")
+        norm = plt.Normalize(vmin=float(p.min()), vmax=float(p.max()))
+        
+        # Plot dos nós
+        colors = [cmap(norm(pi)) for pi in p]
+        ax.scatter(coord[:, 0], coord[:, 1], s=500, c=colors, zorder=3, edgecolors="black")
+
+        # Plot das arestas e setas de fluxo
+        arrow_scale = 0.05
+        for idx, ((x1, y1), (x2, y2)) in enumerate(segs):
+            ax.plot([x1, x2], [y1, y2], color="black", linewidth=2.0, zorder=1)
+            
+            xm, ym = mids[idx]
+            dx, dy = x2 - x1, y2 - y1
+            L = np.hypot(dx, dy)
+            if L == 0: continue
+            
+            dxn, dyn = dx / L, dy / L
+            nx, ny = -dyn, dxn
+            
+            # Direção da seta baseada na pressão (do maior para o menor)
+            q_dir = 1 if p[edges[idx, 0]] > p[edges[idx, 1]] else -1
+
+            ax.annotate("", 
+                xy=(xm + q_dir * 1.5 * arrow_scale * dxn, ym + q_dir * 1.5 * arrow_scale * dyn),
+                xytext=(xm - q_dir * 1.5 * arrow_scale * dxn, ym - q_dir * 1.5 * arrow_scale * dyn),
+                arrowprops=dict(arrowstyle="-|>", color="black", lw=1.5, mutation_scale=20),
+                zorder=5)
+
+            # Rótulo da vazão
+            ax.text(xm + nx * 0.1, ym + ny * 0.1, f"q={q[idx]:.2f}", 
+                    ha="center", va="center", fontsize=10, zorder=6,
+                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+
+        # Rótulos dos nós
+        for i, (x, y) in enumerate(coord):
+            ax.text(x, y, str(i+1), ha="center", va="center", fontweight='bold', zorder=4)
+            ax.text(x, y - 0.15, f"p={p[i]:.2f}", ha="center", va="top", fontsize=9, color="blue")
+
+        ax.set_aspect("equal")
+        ax.axis("off")
+        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+        plt.colorbar(sm, ax=ax, label="Pressão (p)")
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300)
+        plt.show()
+
+# --- Exemplo de Uso ---
+if __name__ == "__main__":
+    # Definindo a geometria para o plot (x, y)
+    coords = [
+        [0, 0], # Nó 1
+        [1, 0], # Nó 2
+        [2, 0], # Nó 3
+        [2, 1]  # Nó 4
+    ]
+    conec = [(1, 2), (2, 3), (3, 4)]
+    conds = [10, 20, 30]
     
-    rede = RedeHidraulica(n_nos, conectividade, condutancias)
+    rede = RedeHidraulica(n_nos=4, conectividade=conec, condutancias=conds, coordenadas=coords)
     rede.assembly()
-    
-    
-    
-    pressao = rede.resolver(no_atm, no_bomba, q_bomba)
-    print("Pressões nos nós:", pressao)
+    rede.resolver(no_atm=1, no_bomba=4, q_bomba=5)
+    rede.plotaRede()
