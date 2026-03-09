@@ -14,7 +14,7 @@ class RedeHidraulica:
         self.q = None
 
     def assembly(self):
-        """Monta a matriz global A acumulando as matrizes locais de cada cano[cite: 357, 358]."""
+        """Monta a matriz global A acumulando as matrizes locais de cada cano"""
         self.A = np.zeros((self.n_nos, self.n_nos))
         for k, (idx_i, idx_j) in enumerate(self.conec):
             ck = self.C[k]
@@ -28,12 +28,12 @@ class RedeHidraulica:
         Atilde = self.A.copy()
         b = np.zeros(self.n_nos)
         
-        # Condição de contorno: Pressão fixada (p_atm = 0) [cite: 150]
+        # Condição de contorno: Pressão fixada (p_atm = 0)
         idx_atm = no_atm - 1
         Atilde[idx_atm, :] = 0
         Atilde[idx_atm, idx_atm] = 1
         
-        # Fonte: Vazão da bomba injetada no nó nB [cite: 152, 217]
+        # Fonte: Vazão da bomba injetada no nó nB
         b[no_bomba - 1] = q_bomba
         
         self.p = np.linalg.solve(Atilde, b)
@@ -41,15 +41,15 @@ class RedeHidraulica:
         return self.p
 
     def calcular_vazoes(self):
-        """Calcula as vazões nos canos usando a fórmula Q = K * D * p[cite: 506]."""
+        """Calcula as vazões nos canos usando a fórmula Q = K * D * p."""
         nc = len(self.conec)
-        # Matriz de incidência D [cite: 510, 513]
+        # Matriz de incidência D
         D = np.zeros((nc, self.n_nos))
         for k, (i, j) in enumerate(self.conec):
             D[k, i] = 1
             D[k, j] = -1
         
-        # Matriz diagonal de condutâncias K [cite: 507, 509]
+        # Matriz diagonal de condutâncias K
         K = np.diag(self.C)
         self.q = K @ D @ self.p
         return self.q
@@ -130,19 +130,3 @@ class RedeHidraulica:
             plt.savefig(save_path, dpi=300)
         plt.show()
 
-# --- Exemplo de Uso ---
-if __name__ == "__main__":
-    # Definindo a geometria para o plot (x, y)
-    coords = [
-        [0, 0], # Nó 1
-        [1, 0], # Nó 2
-        [2, 0], # Nó 3
-        [2, 1]  # Nó 4
-    ]
-    conec = [(1, 2), (2, 3), (3, 4)]
-    conds = [10, 20, 30]
-    
-    rede = RedeHidraulica(n_nos=4, conectividade=conec, condutancias=conds, coordenadas=coords)
-    rede.assembly()
-    rede.resolver(no_atm=1, no_bomba=4, q_bomba=5)
-    rede.plotaRede()
