@@ -123,6 +123,10 @@ class RedeHidraulica:
 
         ax.set_aspect("equal")
         ax.axis("off")
+        ax.set_xlim(coord[:,0].min() - 0.5, coord[:,0].max() + 0.5)
+        ax.set_ylim(coord[:,1].min() - 0.5, coord[:,1].max() + 0.5)
+        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+        plt.colorbar(sm, ax=ax, label="Pressão (p)")
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         plt.colorbar(sm, ax=ax, label="Pressão (p)")
         
