@@ -55,7 +55,7 @@ class RedeHidraulica:
         return self.q
 
     def plotaRede(self, save_path=None):
-        """Funcionalidade de visualização adaptada do código do professor."""
+        """Abre uma janela do matplotlib que plota o grafo."""
         if self.p is None or self.q is None:
             print("Erro: Resolva a rede antes de plotar.")
             return
