@@ -7,6 +7,7 @@ import numpy as np
 def gerar_grafo_aleatorio(numero_nos:int, numero_conexoes:int) -> RedeHidraulica:
     if numero_conexoes < numero_nos - 1:
         raise ValueError("Numero de conexões tem que ser no mínimo igual ao número de nós (do contrário, algum nó ficará sem conexão.)")
+
     rng = np.random.default_rng()
     condutancias = rng.uniform(low=0.1,high=20.0,size=numero_conexoes)
     coordenadas = rng.integers(low=0, high = 10, size=(numero_nos,2))
@@ -26,38 +27,38 @@ def gerar_grafo_aleatorio(numero_nos:int, numero_conexoes:int) -> RedeHidraulica
     
     return RedeHidraulica(numero_nos,conexoes,condutancias,coordenadas)
 
-
-
 def plotar_grafo_alternativo(grafo: RedeHidraulica) -> None:
     """
     Gera um plot interativo com repulsão gravitacional (force-directed) 
     para a rede hidráulica.
     """
-    if getattr(grafo, 'p', None) is None or getattr(grafo, 'q', None) is None:
+    if getattr(grafo, 'pressao', None) is None or getattr(grafo, 'vazao', None) is None:
         print("A rede não está resolvida.")
         return
     net = Network(height="750px", width="100%", bgcolor="#222222", font_color="white", directed=True)
     
     net.barnes_hut(gravity=-8000, central_gravity=0.3, spring_length=150, spring_strength=0.05, damping=0.09)
 
-    p = grafo.p
+    p = grafo.pressao
     norm = mcolors.Normalize(vmin=float(p.min()), vmax=float(p.max()))
     cmap = cm.get_cmap("coolwarm")
     
-    for i in range(grafo.n_nos):
+    for i in range(grafo.numero_nos):
         rgba = cmap(norm(p[i]))
         hex_color = mcolors.to_hex(rgba)
         
         node_label = f"Nó {i+1}\np={p[i]:.2f}"
         net.add_node(i, label=node_label, color=hex_color, title=f"Pressão exata: {p[i]:.4f}")
 
-    for idx, (u, v) in enumerate(grafo.conec):
-        flow = grafo.q[idx]
+    for idx, (u, v) in enumerate(grafo.conectividade):
+        flow = grafo.vazao[idx]
         
         if p[u] > p[v]:
             source, target = u, v
         else:
             source, target = v, u
+
+        print(f"idx: {idx}, u: {u}, v: {v}, source: {source}, target: {target}")
             
         net.add_edge(
             int(source), 

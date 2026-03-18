@@ -4,71 +4,78 @@ import matplotlib.cm as cm
 
 class RedeHidraulica:
     def __init__(self, n_nos, conectividade, condutancias, coordenadas=None):
-        self.n_nos = n_nos
-        # Armazenamos a conectividade em base 0 internamente para facilitar o plot
-        self.conec = np.array(conectividade) - 1 
-        self.C = np.array(condutancias)
-        self.Xno = np.array(coordenadas) if coordenadas is not None else None
-        self.A = np.zeros((n_nos, n_nos))
-        self.p = None
-        self.q = None
+        """Construtor da classe da rede hidráulica."""
+        self.numero_nos = n_nos
+        
+        self.conectividade = np.array(conectividade)
+        self.condutancias = np.array(condutancias)
+        self.posicoes_nos = np.array(coordenadas) if coordenadas is not None else None
+        
+        self.matriz_global = None
+        self.pressao = None
+        self.vazao = None
 
     def assembly(self):
-        """Monta a matriz global A acumulando as matrizes locais de cada cano"""
-        self.A = np.zeros((self.n_nos, self.n_nos))
-        for k, (idx_i, idx_j) in enumerate(self.conec):
-            ck = self.C[k]
-            self.A[idx_i, idx_i] += ck
-            self.A[idx_j, idx_j] += ck
-            self.A[idx_i, idx_j] -= ck
-            self.A[idx_j, idx_i] -= ck
+        """Monta a matriz global do sistema acumulando as matrizes locais de cada cano."""
+        self.matriz_global = np.zeros((self.numero_nos, self.numero_nos))
 
-    def resolver(self, no_atm, no_bomba, q_bomba):
-        """Resolve o sistema linear modificando a linha do nó atmosférico[cite: 217, 492]."""
-        Atilde = self.A.copy()
-        b = np.zeros(self.n_nos)
+        # Série das matrizes de cada cano
+        for k, (idx_i, idx_j) in enumerate(self.conectividade):
+            ck = self.condutancias[k]
+            self.matriz_global[idx_i, idx_i] += ck
+            self.matriz_global[idx_j, idx_j] += ck
+            self.matriz_global[idx_i, idx_j] -= ck
+            self.matriz_global[idx_j, idx_i] -= ck
+
+    def resolver(self, no_atm, no_bomba, vazao_bomba):
+        """Resolve a rede utilizando análise nodal."""
+        matriz_modificada = self.matriz_global.copy()
         
-        # Condição de contorno: Pressão fixada (p_atm = 0)
+        # Nó de referência em que a pressão é zero.
         idx_atm = no_atm - 1
-        Atilde[idx_atm, :] = 0
-        Atilde[idx_atm, idx_atm] = 1
+        matriz_modificada[idx_atm, :] = 0
+        matriz_modificada[idx_atm, idx_atm] = 1
         
-        # Fonte: Vazão da bomba injetada no nó nB
-        b[no_bomba - 1] = q_bomba
+        # Fonte: Vazão da bomba injetada no nó de referência
+        vazao_modificada = np.zeros(self.numero_nos)
+        vazao_modificada[no_bomba - 1] = vazao_bomba
         
-        self.p = np.linalg.solve(Atilde, b)
+        self.pressao = np.linalg.solve(matriz_modificada, vazao_modificada)
         self.calcular_vazoes()
-        return self.p
+        return self.pressao
 
     def calcular_vazoes(self):
         """Calcula as vazões nos canos usando a fórmula Q = K * D * p."""
-        nc = len(self.conec)
         # Matriz de incidência D
-        D = np.zeros((nc, self.n_nos))
-        for k, (i, j) in enumerate(self.conec):
-            D[k, i] = 1
-            D[k, j] = -1
+        numero_canos = len(self.conectividade)
+        matriz_incidencia = np.zeros((numero_canos, self.numero_nos))
+        for k, (i, j) in enumerate(self.conectividade):
+            matriz_incidencia[k, i] = 1
+            matriz_incidencia[k, j] = -1
         
         # Matriz diagonal de condutâncias K
-        K = np.diag(self.C)
-        self.q = K @ D @ self.p
-        return self.q
+        matriz_condutancias = np.diag(self.condutancias)
+
+        # Computando a vazão com a expressão q = KDp 
+        self.vazao = matriz_condutancias @ matriz_incidencia @ self.pressao
+        
+        return self.vazao
 
     def plotaRede(self, save_path=None):
         """Abre uma janela do matplotlib que plota o grafo."""
-        if self.p is None or self.q is None:
+        if self.pressao is None or self.vazao is None:
             print("Erro: Resolva a rede antes de plotar.")
             return
 
-        coord = self.Xno
+        coord = self.posicoes_nos
         if coord is None:
             print("Erro: Coordenadas dos nós não fornecidas no construtor.")
             return
 
-        edges = self.conec
-        p = self.p
-        q = self.q
-        nv = self.n_nos
+        edges = self.conectividade
+        p = self.pressao
+        q = self.vazao
+        nv = self.numero_nos
 
         segs = []
         mids = []
@@ -125,11 +132,10 @@ class RedeHidraulica:
         ax.axis("off")
         ax.set_xlim(coord[:,0].min() - 0.5, coord[:,0].max() + 0.5)
         ax.set_ylim(coord[:,1].min() - 0.5, coord[:,1].max() + 0.5)
+
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         plt.colorbar(sm, ax=ax, label="Pressão (p)")
-        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-        plt.colorbar(sm, ax=ax, label="Pressão (p)")
-        
+
         if save_path:
             plt.savefig(save_path, dpi=300)
         plt.show()
@@ -137,4 +143,3 @@ class RedeHidraulica:
 def calcular_potencia_bomba(q_bomba,no_bomba,rede,p_noatm):
     pbomba = rede.p[no_bomba - 1]
     return (pbomba-p_noatm)*q_bomba
-
