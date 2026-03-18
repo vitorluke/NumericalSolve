@@ -36,25 +36,26 @@ class RedeHidraulica:
             self.matriz_global[idx_i, idx_j] -= ck
             self.matriz_global[idx_j, idx_i] -= ck
 
-    def resolver(self, nos_atm:list, bombas:dict):
+    def resolver(self, pressao_imposta:dict, vazao_imposta:dict):
+        """Resolve a rede utilizando análise nodal, impondo condições de contorno."""
+        
         if self.matriz_global is None:
             self.assembly()
-        
-        """Resolve a rede utilizando análise nodal."""
+
+        # Modificando o sistema linear do sistema para acomodar as CC.
         matriz_modificada = self.matriz_global.copy()
         vazao_modificada = np.zeros(self.numero_nos)
 
-        for no,vazao_bomba in bombas.items():
-            index = no - 1
-            vazao_modificada[index] +=vazao_bomba       
-        
-        # Nó de referência em que a pressão é zero.
+        # Impondo vazão sobre um nó
+        for k, vazao in vazao_imposta.items():
+            vazao_modificada[k-1] = vazao
 
-        for no in nos_atm:
-            index_atm = no - 1
-            matriz_modificada[index_atm, :] = 0
-            matriz_modificada[index_atm, index_atm] = 1
-            vazao_modificada[index_atm] = 0
+        # Impondo pressão sobre um nó
+        for k, pressao in pressao_imposta.items():
+            matriz_modificada[k-1, :] = 0
+            matriz_modificada[k-1, k-1] = 1
+            vazao_modificada[k-1] = pressao
+
         self.pressao = np.linalg.solve(matriz_modificada,vazao_modificada)
         self.calcular_vazoes()
 
