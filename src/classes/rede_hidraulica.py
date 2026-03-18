@@ -20,8 +20,9 @@ class RedeHidraulica:
         self.historico_pressao = []
         self.historico_vazao = []
 
-        self.historico_pressao.append(self.pressao.copy())
-        self.historico_vazao.append(self.vazao.copy())
+        if (self.pressao != None and self.vazao != None):
+            self.historico_pressao.append(self.pressao.copy())
+            self.historico_vazao.append(self.vazao.copy())
 
     def assembly(self):
         """Monta a matriz global do sistema acumulando as matrizes locais de cada cano."""
@@ -41,7 +42,7 @@ class RedeHidraulica:
         
         """Resolve a rede utilizando análise nodal."""
         matriz_modificada = self.matriz_global.copy()
-        vazao_modificada = np.zeroes(self.numero_nos)
+        vazao_modificada = np.zeros(self.numero_nos)
 
         for no,vazao_bomba in bombas.items():
             index = no - 1

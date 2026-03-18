@@ -96,7 +96,7 @@ def plotar_grafo_alternativo(grafo: RedeHidraulica) -> None:
 def gera_rede(levels=3):
     # Constantes relevantes
     A_k = 2.5e-7
-    mu = 1e-1
+    mu = 1e-3
     D_k = math.sqrt(4*A_k/math.pi)
     chi_k = math.pi * D_k**4 / (128 * mu)
         
