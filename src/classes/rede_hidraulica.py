@@ -3,14 +3,16 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 class RedeHidraulica:
-    def __init__(self, n_nos, conectividade, condutancias, coordenadas=None):
+    def __init__(self, n_nos, conectividade, condutancias, coordenadas:None, vazao_por_no = None, pressao_por_no = None):
         """Construtor da classe da rede hidráulica."""
         self.numero_nos = n_nos
         
         self.conectividade = np.array(conectividade)
         self.condutancias = np.array(condutancias)
         self.posicoes_nos = np.array(coordenadas) if coordenadas is not None else None
-        
+        self.vazoes_por_no = vazao_por_no
+        self.pressao_por_no = pressao_por_no
+
         self.matriz_global = None
         self.pressao = None
         self.vazao = None

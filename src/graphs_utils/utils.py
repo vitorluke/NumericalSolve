@@ -4,6 +4,11 @@ import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 import numpy as np
 
+
+def gerar_grafo_aleatorio_level():
+    return 0
+
+
 def gerar_grafo_aleatorio(numero_nos:int, numero_conexoes:int) -> RedeHidraulica:
     if numero_conexoes < numero_nos - 1:
         raise ValueError("Numero de conexões tem que ser no mínimo igual ao número de nós (do contrário, algum nó ficará sem conexão.)")
