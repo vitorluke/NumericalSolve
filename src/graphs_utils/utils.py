@@ -27,7 +27,9 @@ def gerar_grafo_aleatorio(numero_nos:int, numero_conexoes:int) -> RedeHidraulica
     for _ in range(restante):
         pair = rng.choice(numero_nos,size=2,replace=False)
         conexoes.append(pair)
-    conexoes = np.array(conexoes)
+
+    # Indexação baseada em 1
+    conexoes = np.array(conexoes) + 1
     
     return RedeHidraulica(numero_nos,conexoes,condutancias,coordenadas)
 
@@ -94,20 +96,21 @@ def plotar_grafo_alternativo(grafo: RedeHidraulica) -> None:
     }
     """)
 
-def gera_rede(levels=3):
+def gera_rede(levels:int=3):
     # Constantes relevantes
     A_k = 2.5e-7
     mu = 1e-3
     D_k = math.sqrt(4*A_k/math.pi)
     chi_k = math.pi * D_k**4 / (128 * mu)
         
+    # Função providenciada de gerar grafos
     coordenadas, conectividade = gera_grafo(levels)
 
     numero_nos = len(coordenadas)
-
     condutancias = []
 
     for conexao in conectividade:
+        # Cálculo do comprimento do cano
         no_1 = coordenadas[conexao[0]]
         no_2 = coordenadas[conexao[1]]
 
@@ -118,6 +121,6 @@ def gera_rede(levels=3):
 
     condutancias = np.array(condutancias)
 
-    rede = RedeHidraulica(numero_nos, conectividade, condutancias, coordenadas)
+    rede = RedeHidraulica(numero_nos, conectividade + 1, condutancias, coordenadas)
 
     return rede
