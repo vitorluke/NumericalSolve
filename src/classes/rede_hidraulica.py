@@ -17,6 +17,12 @@ class RedeHidraulica:
         self.pressao = None
         self.vazao = None
 
+        self.historico_pressao = []
+        self.historico_vazao = []
+
+        self.historico_pressao.append(self.pressao.copy())
+        self.historico_vazao.append(self.vazao.copy())
+
     def assembly(self):
         """Monta a matriz global do sistema acumulando as matrizes locais de cada cano."""
         self.matriz_global = np.zeros((self.numero_nos, self.numero_nos))
@@ -155,3 +161,10 @@ class RedeHidraulica:
 def calcular_potencia_bomba(q_bomba,no_bomba,rede,p_noatm):
     pbomba = rede.p[no_bomba - 1]
     return (pbomba-p_noatm)*q_bomba
+
+def calcular_potencias_bombas(bombas:dict, rede:RedeHidraulica, cenario_index:int = -1, p_noatm:float = 0.0):
+    if not rede.historico_pressao:
+        raise ValueError("A rede precisa estar resolvida para calcular a potência das bombas")
+    pressoes_cenario = rede.historico_pressao[cenario_index]
+    
+
