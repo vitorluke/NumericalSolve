@@ -7,7 +7,7 @@ from src.graph_benchmarking.benchmark import *
 def main():
     rede = gera_rede(1)
     rede.assembly()
-    pressao = rede.resolver(pressao_imposta={6: 0}, vazao_imposta={1: 0.2})
+    pressao = rede.resolver(pressao_imposta={6: 0.0}, vazao_imposta={1: 0.1})
     rede.plotaRede()
 
     #print("Executando Exercícios 4, 5 e 6...")

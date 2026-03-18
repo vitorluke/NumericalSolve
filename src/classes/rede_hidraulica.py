@@ -19,16 +19,12 @@ class RedeHidraulica:
 
         self.historico_pressao = []
         self.historico_vazao = []
-        if self.pressao is not None:
-            self.historico_pressao.append(self.pressao.copy())
-        if self.vazao is not None:
-            self.historico_vazao.append(self.vazao.copy())
 
     def assembly(self):
         """Monta a matriz global do sistema acumulando as matrizes locais de cada cano."""
+        # Série das matrizes locais de cada cano
         self.matriz_global = np.zeros((self.numero_nos, self.numero_nos))
 
-        # Série das matrizes de cada cano
         for k, (idx_i, idx_j) in enumerate(self.conectividade):
             ck = self.condutancias[k]
             self.matriz_global[idx_i, idx_i] += ck
@@ -46,11 +42,11 @@ class RedeHidraulica:
         matriz_modificada = self.matriz_global.copy()
         vazao_modificada = np.zeros(self.numero_nos)
 
-        # Impondo vazão sobre um nó
+        # Impondo vazão sobre os nós relevantes
         for k, vazao in vazao_imposta.items():
             vazao_modificada[k-1] = vazao
 
-        # Impondo pressão sobre um nó
+        # Impondo pressão sobre os nós relevantes
         for k, pressao in pressao_imposta.items():
             matriz_modificada[k-1, :] = 0
             matriz_modificada[k-1, k-1] = 1
@@ -179,6 +175,3 @@ def calcular_potencias_bombas(bombas:dict, rede:RedeHidraulica, cenario_index:in
         potencia_total += potencia
 
     return potencia_total, potencias_individuais
-
-
-
