@@ -166,5 +166,20 @@ def calcular_potencias_bombas(bombas:dict, rede:RedeHidraulica, cenario_index:in
     if not rede.historico_pressao:
         raise ValueError("A rede precisa estar resolvida para calcular a potência das bombas")
     pressoes_cenario = rede.historico_pressao[cenario_index]
-    
+
+    potencia_total = 0.0
+    potencias_individuais = {}
+
+    for no_bomba, q_bomba in bombas.items():
+        index_bomba = no_bomba - 1
+        p_bomba = pressoes_cenario[index_bomba]
+
+        potencia = (p_bomba - p_noatm) * q_bomba
+
+        potencias_individuais[no_bomba] = potencia
+        potencia_total += potencia
+        
+    return potencia_total, potencias_individuais
+
+
 
