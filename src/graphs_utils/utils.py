@@ -1,13 +1,11 @@
+import math as math
 from src.classes.rede_hidraulica import RedeHidraulica
 from pyvis.network import Network
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 import numpy as np
 
-
-def gerar_grafo_aleatorio_level():
-    return 0
-
+from src.graphs_utils.gera_grafo import gera_grafo
 
 def gerar_grafo_aleatorio(numero_nos:int, numero_conexoes:int) -> RedeHidraulica:
     if numero_conexoes < numero_nos - 1:
@@ -63,8 +61,6 @@ def plotar_grafo_alternativo(grafo: RedeHidraulica) -> None:
         else:
             source, target = v, u
 
-        print(f"idx: {idx}, u: {u}, v: {v}, source: {source}, target: {target}")
-            
         net.add_edge(
             int(source), 
             int(target), 
@@ -96,3 +92,31 @@ def plotar_grafo_alternativo(grafo: RedeHidraulica) -> None:
       }
     }
     """)
+
+def gera_rede(levels=3):
+    # Constantes relevantes
+    A_k = 2.5e-7
+    mu = 1e-1
+    D_k = math.sqrt(4*A_k/math.pi)
+    chi_k = math.pi * D_k**4 / (128 * mu)
+        
+    coordenadas, conectividade = gera_grafo(levels)
+
+    numero_nos = len(coordenadas)
+
+    condutancias = []
+
+    for conexao in conectividade:
+        no_1 = coordenadas[conexao[0]]
+        no_2 = coordenadas[conexao[1]]
+
+        L_k = math.sqrt((no_1[0]-no_2[0])**2+(no_1[1]-no_2[1])**2)
+        condutancia = chi_k / L_k
+
+        condutancias.append(condutancia)
+
+    condutancias = np.array(condutancias)
+
+    rede = RedeHidraulica(numero_nos, conectividade, condutancias, coordenadas)
+
+    return rede
