@@ -3,17 +3,25 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 class RedeHidraulica:
-    def __init__(self, n_nos, conectividade, condutancias, coordenadas=None):
+    def __init__(self, n_nos, conectividade, condutancias, coordenadas:None, vazao_por_no = None, pressao_por_no = None):
         """Construtor da classe da rede hidráulica."""
         self.numero_nos = n_nos
         
         self.conectividade = np.array(conectividade)
         self.condutancias = np.array(condutancias)
         self.posicoes_nos = np.array(coordenadas) if coordenadas is not None else None
-        
+        self.vazoes_por_no = vazao_por_no
+        self.pressao_por_no = pressao_por_no
+
         self.matriz_global = None
         self.pressao = None
         self.vazao = None
+
+        self.historico_pressao = []
+        self.historico_vazao = []
+
+        self.historico_pressao.append(self.pressao.copy())
+        self.historico_vazao.append(self.vazao.copy())
 
     def assembly(self):
         """Monta a matriz global do sistema acumulando as matrizes locais de cada cano."""
@@ -27,21 +35,31 @@ class RedeHidraulica:
             self.matriz_global[idx_i, idx_j] -= ck
             self.matriz_global[idx_j, idx_i] -= ck
 
-    def resolver(self, no_atm, no_bomba, vazao_bomba):
+    def resolver(self, nos_atm:list, bombas:dict):
+        if self.matriz_global is None:
+            self.assembly()
+        
         """Resolve a rede utilizando análise nodal."""
         matriz_modificada = self.matriz_global.copy()
+        vazao_modificada = np.zeroes(self.numero_nos)
+
+        for no,vazao_bomba in bombas.items():
+            index = no - 1
+            vazao_modificada[index] +=vazao_bomba       
         
         # Nó de referência em que a pressão é zero.
-        idx_atm = no_atm - 1
-        matriz_modificada[idx_atm, :] = 0
-        matriz_modificada[idx_atm, idx_atm] = 1
-        
-        # Fonte: Vazão da bomba injetada no nó de referência
-        vazao_modificada = np.zeros(self.numero_nos)
-        vazao_modificada[no_bomba - 1] = vazao_bomba
-        
-        self.pressao = np.linalg.solve(matriz_modificada, vazao_modificada)
+
+        for no in nos_atm:
+            index_atm = no - 1
+            matriz_modificada[index_atm, :] = 0
+            matriz_modificada[index_atm, index_atm] = 1
+            vazao_modificada[index_atm] = 0
+        self.pressao = np.linalg.solve(matriz_modificada,vazao_modificada)
         self.calcular_vazoes()
+
+        self.historico_pressao.append(self.pressao.copy())
+        self.historico_vazao.append(self.vazao.copy())
+
         return self.pressao
 
     def calcular_vazoes(self):
@@ -140,6 +158,25 @@ class RedeHidraulica:
             plt.savefig(save_path, dpi=300)
         plt.show()
 
-def calcular_potencia_bomba(q_bomba,no_bomba,rede,p_noatm):
-    pbomba = rede.p[no_bomba - 1]
-    return (pbomba-p_noatm)*q_bomba
+
+def calcular_potencias_bombas(bombas:dict, rede:RedeHidraulica, cenario_index:int = -1, p_noatm:float = 0.0):
+    if not rede.historico_pressao:
+        raise ValueError("A rede precisa estar resolvida para calcular a potência das bombas")
+    pressoes_cenario = rede.historico_pressao[cenario_index]
+
+    potencia_total = 0.0
+    potencias_individuais = {}
+
+    for no_bomba, q_bomba in bombas.items():
+        index_bomba = no_bomba - 1
+        p_bomba = pressoes_cenario[index_bomba]
+
+        potencia = (p_bomba - p_noatm) * q_bomba
+
+        potencias_individuais[no_bomba] = potencia
+        potencia_total += potencia
+        
+    return potencia_total, potencias_individuais
+
+
+
