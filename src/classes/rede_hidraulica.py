@@ -158,9 +158,6 @@ class RedeHidraulica:
             plt.savefig(save_path, dpi=300)
         plt.show()
 
-def calcular_potencia_bomba(q_bomba,no_bomba,rede,p_noatm):
-    pbomba = rede.p[no_bomba - 1]
-    return (pbomba-p_noatm)*q_bomba
 
 def calcular_potencias_bombas(bombas:dict, rede:RedeHidraulica, cenario_index:int = -1, p_noatm:float = 0.0):
     if not rede.historico_pressao:
