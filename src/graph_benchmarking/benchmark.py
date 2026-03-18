@@ -1,4 +1,5 @@
 from src.classes.rede_hidraulica import RedeHidraulica
+from src.graphs_utils.gera_grafo import gera_grafo
 import numpy as np
 import matplotlib.pyplot as plt
 import time
@@ -25,7 +26,7 @@ def exercicio_4(rede, nos_atm, omega=3, n_passos=1000, tempo_final=10):
     tempo = np.linspace(0, tempo_final, n_passos)
     q0_t = 0.1 * np.sin(omega * tempo)
     
-    pressao_base_0 = resolver_base_superposicao(rede, nos_atm, 0)
+    pressao_base_0 = resolver_base_superposicao(rede, nos_atm, 1)
     
     pressoes_maximas = []
     
@@ -41,7 +42,7 @@ def exercicio_5(rede, nos_atm, omega=4, n_passos=1000, tempo_final=10):
     q0_t = 0.1 * np.sin(3 * tempo)
     q175_t = 0.01 * np.cos(omega * tempo)
     
-    pressao_base_0 = resolver_base_superposicao(rede, nos_atm, 0)
+    pressao_base_0 = resolver_base_superposicao(rede, nos_atm, 1)
     pressao_base_175 = resolver_base_superposicao(rede, nos_atm, 175)
     
     pressoes_maximas = []
@@ -63,7 +64,7 @@ def exercicio_6(rede, nos_atm, n_passos=1000, tempo_final=10):
     tempo = np.linspace(0, tempo_final, n_passos)
     q0_constante = 0.1
     
-    pressao_base_0 = resolver_base_superposicao(rede, nos_atm, 0)
+    pressao_base_0 = resolver_base_superposicao(rede, nos_atm, 1)
     
     temperatura_inicial = calcular_temperatura(0)
     viscosidade_inicial = calcular_viscosidade(temperatura_inicial)
@@ -73,9 +74,7 @@ def exercicio_6(rede, nos_atm, n_passos=1000, tempo_final=10):
     for t in tempo:
         temp_atual = calcular_temperatura(t)
         visc_atual = calcular_viscosidade(temp_atual)
-        
         fator_escala = visc_atual / viscosidade_inicial
-        
         pressao_t = (q0_constante * pressao_base_0) * fator_escala
         pressoes_maximas.append(np.max(pressao_t))
         
@@ -126,10 +125,20 @@ def avaliar_desempenho_rede(rede, nos_atm, bombas, num_execucoes=10):
     
     return tempo_medio_montagem, tempo_medio_resolucao
 
-def exercicio_7(lista_redes, lista_niveis, nos_atm, bombas):
+def exercicio_7(niveis, vazao_bomba=0.1):
     print(f"{'Nível':<10} | {'Nº de Nós':<15} | {'Tempo Montagem (s)':<25} | {'Tempo Resolução (s)':<25}")
     print("-" * 80)
     
-    for rede, nivel in zip(lista_redes, lista_niveis):
+    for nivel in niveis:
+        nos, arestas = gera_grafo(levels=nivel)
+        numero_nos = len(nos)
+        condutancias = np.ones(len(arestas))
+        
+        rede = RedeHidraulica(n_nos=numero_nos, conectividade=arestas, condutancias=condutancias, coordenadas=nos)
+        
+        nos_atm = [numero_nos] 
+        bombas = {1: vazao_bomba}
+        
         t_montagem, t_resolucao = avaliar_desempenho_rede(rede, nos_atm, bombas)
-        print(f"{nivel:<10} | {rede.numero_nos:<15} | {t_montagem:<25.6e} | {t_resolucao:<25.6e}")
+        print(f"{nivel:<10} | {numero_nos:<15} | {t_montagem:<25.6e} | {t_resolucao:<25.6e}")
+

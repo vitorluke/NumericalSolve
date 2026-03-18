@@ -1,5 +1,6 @@
 import math as math
 from src.classes.rede_hidraulica import RedeHidraulica
+from src.graphs_utils.gera_grafo import gera_grafo
 from pyvis.network import Network
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm

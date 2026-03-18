@@ -19,9 +19,9 @@ class RedeHidraulica:
 
         self.historico_pressao = []
         self.historico_vazao = []
-
-        if (self.pressao != None and self.vazao != None):
+        if self.pressao is not None:
             self.historico_pressao.append(self.pressao.copy())
+        if self.vazao is not None:
             self.historico_vazao.append(self.vazao.copy())
 
     def assembly(self):
@@ -176,7 +176,7 @@ def calcular_potencias_bombas(bombas:dict, rede:RedeHidraulica, cenario_index:in
 
         potencias_individuais[no_bomba] = potencia
         potencia_total += potencia
-        
+
     return potencia_total, potencias_individuais
 
 
