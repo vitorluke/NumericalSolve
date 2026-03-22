@@ -62,7 +62,7 @@ class RedeHidraulica:
         return self.pressao
 
     def calcular_vazoes(self):
-        """Calcula as vazões nos canos usando a fórmula Q = K * D * p."""
+        """Calcula as vazões nos canos usando a fórmula Q = KDp."""
         # Matriz de incidência D
         numero_canos = len(self.conectividade)
         matriz_incidencia = np.zeros((numero_canos, self.numero_nos))
@@ -77,6 +77,27 @@ class RedeHidraulica:
         self.vazao = matriz_condutancias @ matriz_incidencia @ self.pressao
         
         return self.vazao
+    
+    def calcular_potencia(self):
+        """Calcula a potência consumida na rede empregando a expressão W = p^T(D^TKD)p"""
+        if self.pressao is None:
+            print("Erro: Resolva a rede antes de plotar.")
+            return None
+
+        # Matriz de incidência D
+        numero_canos = len(self.conectividade)
+        matriz_incidencia = np.zeros((numero_canos, self.numero_nos))
+        for k, (i, j) in enumerate(self.conectividade):
+            matriz_incidencia[k, i] = 1
+            matriz_incidencia[k, j] = -1
+        
+        # Matriz diagonal de condutâncias K
+        matriz_condutancias = np.diag(self.condutancias)
+
+        # Computando a potência consumida
+        W = self.pressao.T @ matriz_incidencia.T @ matriz_condutancias @ matriz_incidencia @ self.pressao
+
+        return W
 
     def plotaRede(self, scale=1.0, save_path=None):
         """Abre uma janela do matplotlib que plota o grafo."""
