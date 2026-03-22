@@ -32,13 +32,13 @@ class RedeHidraulica:
             self.matriz_global[idx_i, idx_j] -= ck
             self.matriz_global[idx_j, idx_i] -= ck
 
-    def resolver(self, pressao_imposta:dict, vazao_imposta:dict):
+    def resolver(self, pressao_imposta:dict={}, vazao_imposta:dict={}):
         """Resolve a rede utilizando análise nodal, impondo condições de contorno."""
         
         if self.matriz_global is None:
             self.assembly()
 
-        # Modificando o sistema linear do sistema para acomodar as CC.
+        # Modificando o sistema linear do sistema para acomodar as condições de contorno.
         matriz_modificada = self.matriz_global.copy()
         vazao_modificada = np.zeros(self.numero_nos)
 
@@ -52,6 +52,7 @@ class RedeHidraulica:
             matriz_modificada[k-1, k-1] = 1
             vazao_modificada[k-1] = pressao
 
+        # Resolvendo o sistema de equações
         self.pressao = np.linalg.solve(matriz_modificada,vazao_modificada)
         self.calcular_vazoes()
 
@@ -77,13 +78,13 @@ class RedeHidraulica:
         
         return self.vazao
 
-    def plotaRede(self, save_path=None):
+    def plotaRede(self, scale=1.0, save_path=None):
         """Abre uma janela do matplotlib que plota o grafo."""
         if self.pressao is None or self.vazao is None:
             print("Erro: Resolva a rede antes de plotar.")
             return
 
-        coord = self.posicoes_nos
+        coord = self.posicoes_nos * scale
         if coord is None:
             print("Erro: Coordenadas dos nós não fornecidas no construtor.")
             return

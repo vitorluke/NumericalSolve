@@ -101,10 +101,13 @@ def gera_rede(levels:int=3):
     A_k = 2.5e-7
     mu = 1e-3
     D_k = math.sqrt(4*A_k/math.pi)
-    chi_k = math.pi * D_k**4 / (128 * mu)
+    kappa_k = math.pi * D_k**4 / (128 * mu)
         
     # Função providenciada de gerar grafos
     coordenadas, conectividade = gera_grafo(levels)
+
+    # Conversão de milimetros a metros
+    coordenadas *= 1e-3
 
     numero_nos = len(coordenadas)
     condutancias = []
@@ -115,7 +118,8 @@ def gera_rede(levels:int=3):
         no_2 = coordenadas[conexao[1]]
 
         L_k = math.sqrt((no_1[0]-no_2[0])**2+(no_1[1]-no_2[1])**2)
-        condutancia = chi_k / L_k
+
+        condutancia = kappa_k / L_k
 
         condutancias.append(condutancia)
 
