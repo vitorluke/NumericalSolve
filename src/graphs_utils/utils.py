@@ -11,7 +11,6 @@ from src.graphs_utils.gera_grafo import gera_grafo
 def gerar_grafo_aleatorio(numero_nos:int, numero_conexoes:int) -> RedeHidraulica:
     if numero_conexoes < numero_nos - 1:
         raise ValueError("Numero de conexões tem que ser no mínimo igual ao número de nós (do contrário, algum nó ficará sem conexão.)")
-
     rng = np.random.default_rng()
     condutancias = rng.uniform(low=0.1,high=20.0,size=numero_conexoes)
     coordenadas = rng.integers(low=0, high = 10, size=(numero_nos,2))

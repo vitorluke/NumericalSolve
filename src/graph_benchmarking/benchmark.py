@@ -17,7 +17,7 @@ def plot_pressao_maxima(vetor_tempo, vetor_pressao, titulo, caminho_salvar=None)
         plt.savefig(caminho_salvar, dpi=300)
     plt.show()
 
-def resolver_base_superposicao(rede, nos_atm, no_injecao):
+def resolver_base_superposicao(rede:RedeHidraulica, nos_atm, no_injecao):
     bombas_unitarias = {no_injecao: 1.0}
     pressao_base = rede.resolver(nos_atm, bombas_unitarias)
     return pressao_base.copy()
@@ -33,16 +33,19 @@ def exercicio_4(rede, nos_atm, omega=3, n_passos=1000, tempo_final=10):
     for q in q0_t:
         pressao_t = q * pressao_base_0
         pressoes_maximas.append(np.max(pressao_t))
-        
+    
     plot_pressao_maxima(tempo, pressoes_maximas, "Ex 4: Pressão Máxima na Rede ao Longo do Tempo")
     return tempo, pressoes_maximas
 
-def exercicio_5(rede, nos_atm, omega=4, n_passos=1000, tempo_final=10):
+def exercicio_5(rede:RedeHidraulica, nos_atm, omega=4, n_passos=1000, tempo_final=10):
     tempo = np.linspace(0, tempo_final, n_passos)
     q0_t = 0.1 * np.sin(3 * tempo)
     q175_t = 0.01 * np.cos(omega * tempo)
     
     pressao_base_0 = resolver_base_superposicao(rede, nos_atm, 1)
+
+    last_node = rede.numero_nos if rede.numero_nos < 175 else 175
+
     pressao_base_175 = resolver_base_superposicao(rede, nos_atm, 175)
     
     pressoes_maximas = []
@@ -126,7 +129,7 @@ def avaliar_desempenho_rede(rede, nos_atm, bombas, num_execucoes=10):
     return tempo_medio_montagem, tempo_medio_resolucao
 
 def exercicio_7(niveis, vazao_bomba=0.1):
-    print(f"{'Nível':<10} | {'Nº de Nós':<15} | {'Tempo Montagem (s)':<25} | {'Tempo Resolução (s)':<25}")
+    print(f"{'Nível':<10} | {'Nº de Nós':<15} | {'Tempo Médio Montagem (s)':<25} | {'Tempo Médio Resolução (s)':<25}")
     print("-" * 80)
     
     for nivel in niveis:
@@ -134,7 +137,7 @@ def exercicio_7(niveis, vazao_bomba=0.1):
         numero_nos = len(nos)
         condutancias = np.ones(len(arestas))
         
-        rede = RedeHidraulica(n_nos=numero_nos, conectividade=arestas, condutancias=condutancias, coordenadas=nos)
+        rede = RedeHidraulica(numero_nos=numero_nos, conectividade=arestas, condutancias=condutancias, coordenadas=nos)
         
         nos_atm = [numero_nos] 
         bombas = {1: vazao_bomba}
