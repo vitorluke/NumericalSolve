@@ -1,3 +1,4 @@
+from scipy import sparse
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -77,7 +78,9 @@ class PlacaTermica:
                     matriz_modificada[ic, ic] = 1.0
                     vetor_modificado[ic] = T_top
 
-        self.temperaturas = np.linalg.solve(matriz_modificada, vetor_modificado)
+        matriz_esparsa = sparse.csr_matrix(matriz_modificada)
+        self.temperaturas = sparse.linalg.spsolve(matriz_esparsa, vetor_modificado)
+
         return self.temperaturas
 
     def plotaPlaca(self, flag_type='contour', filename=None):
