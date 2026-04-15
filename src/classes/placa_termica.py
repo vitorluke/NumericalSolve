@@ -1,4 +1,7 @@
 import numpy as np
+import numpy.typing as math_types
+
+
 
 def flatten_coordinate(i,j,N):
     return i + j * N
@@ -39,5 +42,7 @@ class PlacaTermica:
                 index_center = flatten_coordinate(i,j,N)       
                 b[index_center] = (grid_spacing * grid_spacing) * heat_source
         return b
+    
+    def simplify_vector(N:int, b:math_types.NDArray)
 
                 
