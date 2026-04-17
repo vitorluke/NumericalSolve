@@ -83,6 +83,7 @@ class PlacaTermica:
         self.temperaturas = sparse.linalg.spsolve(matriz_esparsa, vetor_modificado)
 
         return self.temperaturas
+        
 
     def plotaPlaca(self, flag_type='contour', filename=None):
         """Plota a dispersão de calor da placa (contour 2D ou surface 3D)."""
@@ -123,6 +124,29 @@ class PlacaTermica:
             plt.savefig(filename)
 
         plt.show()
+
+    def obter_sistema_com_contorno(self, T_top, T_bottom, T_left, T_right):
+        if self.matriz_global is None:
+            self.assembly()
+
+        A = self.matriz_global.copy()
+        b = self.vetor_fonte.copy()
+
+        for i in range(self.Nx):
+            for j in range(self.Ny):
+                ic = self.flatten_coordinate(i, j)
+                if i == 0:
+                    A[ic, :] = 0; A[ic, ic] = 1.0; b[ic] = T_left
+                elif i == self.Nx - 1:
+                    A[ic, :] = 0; A[ic, ic] = 1.0; b[ic] = T_right
+                elif j == 0:
+                    A[ic, :] = 0; A[ic, ic] = 1.0; b[ic] = T_bottom
+                elif j == self.Ny - 1:
+                    A[ic, :] = 0; A[ic, ic] = 1.0; b[ic] = T_top
+                    
+        return A, b
+    
+
     def gerar_historico_jacobi(self, T_top: float, T_bottom: float, T_left: float, T_right: float, max_iter: int = 150):
         """Resolve a placa via Jacobi e retorna uma lista com o estado da malha a cada iteração."""
         # Inicializa a malha com zeros
@@ -215,10 +239,97 @@ class PlacaTermica:
             print(f"Animação salva como {filename}")
             
         plt.show()
+    def resolver_com_circulo(self, T_c: float, T_top: float, T_bottom: float, T_left: float, T_right: float, raio: float, cx: float, cy: float):
+        """
+        Monta e resolve a placa aplicando uma temperatura T_c fixa 
+        em uma região circular definida por um raio e centro (cx, cy).
+        Retorna a matriz de temperaturas e o valor máximo encontrado.
+        """
+        # Pega a matriz normal com as bordas
+        A, b = self.obter_sistema_com_contorno(T_top, T_bottom, T_left, T_right)
+
+        # Aplica a condição de contorno do círculo (sobrescrevendo os nós internos)
+        for i in range(self.Nx):
+            for j in range(self.Ny):
+                x = i * self.h
+                y = j * self.h
+                
+                # Equação do círculo: (x - cx)^2 + (y - cy)^2 <= r^2
+                if (x - cx)**2 + (y - cy)**2 <= raio**2:
+                    ic = self.flatten_coordinate(i, j)
+                    A[ic, :] = 0.0
+                    A[ic, ic] = 1.0
+                    b[ic] = T_c
+
+        # Resolve o sistema (usando o solver direto aqui pq é mais rápido para o loop externo)
+        matriz_esparsa = sparse.csr_matrix(A)
+        temp_1d = sparse.linalg.spsolve(matriz_esparsa, b)
+        
+        T_max_atual = np.max(temp_1d)
+        
+        return temp_1d.reshape((self.Ny, self.Nx)), T_max_atual
+
+
+    def descobrir_Tc_para_Tmax(self, T_alvo: float, T_top: float, T_bottom: float, T_left: float, T_right: float, raio: float, cx: float, cy: float, tolerancia: float = 1e-4, max_iter: int = 50):
+        """
+        Usa o Método da Secante (um método iterativo simples) para encontrar 
+        qual T_c faz com que T_max da placa seja exatamente T_alvo.
+        """
+        print(f"\n--- Iniciando busca por T_c para atingir T_max = {T_alvo}°C ---")
+        
+        # Chute 1
+        Tc_0 = 0.0 
+        _, Tmax_0 = self.resolver_com_circulo(Tc_0, T_top, T_bottom, T_left, T_right, raio, cx, cy)
+        erro_0 = Tmax_0 - T_alvo
+        
+        # Chute 2
+        Tc_1 = 100.0
+        _, Tmax_1 = self.resolver_com_circulo(Tc_1, T_top, T_bottom, T_left, T_right, raio, cx, cy)
+        erro_1 = Tmax_1 - T_alvo
+
+        for it in range(max_iter):
+            # Se a diferença entre os erros for zero, deu merda (divisão por zero)
+            if abs(erro_1 - erro_0) < 1e-12:
+                print("Erro: Gradiente zerou. Não foi possível convergir.")
+                break
+                
+            # Fórmula do Método da Secante para adivinhar o próximo T_c
+            Tc_novo = Tc_1 - erro_1 * ((Tc_1 - Tc_0) / (erro_1 - erro_0))
+            
+            # Resolve a placa com o novo T_c
+            mapa_temp, Tmax_novo = self.resolver_com_circulo(Tc_novo, T_top, T_bottom, T_left, T_right, raio, cx, cy)
+            erro_novo = Tmax_novo - T_alvo
+            
+            print(f"Iteração {it+1}: Testando T_c = {Tc_novo:.4f} | T_max obtido = {Tmax_novo:.4f} | Erro = {abs(erro_novo):.6f}")
+            
+            # Verifica se já chegamos perto o suficiente do alvo
+            if abs(erro_novo) < tolerancia:
+                print(f"\n>>> SUCESSO! T_c ideal encontrado: {Tc_novo:.4f}°C")
+                self.temperaturas = mapa_temp.flatten() # Salva para poder usar o plotaPlaca
+                return Tc_novo
+            
+            # Atualiza os valores para o próximo loop
+            Tc_0, erro_0 = Tc_1, erro_1
+            Tc_1, erro_1 = Tc_novo, erro_novo
+
+        print("Aviso: Limite de iterações atingido sem convergir perfeitamente.")
+        return Tc_1
 
 
 if __name__ == "__main__":
     placa = PlacaTermica(Nx=21, Ny=21, condutividade=0.25, h=0.1)
+
+    T_estrela = 150.0
+
+    centro_x = (placa.Nx - 1) * placa.h / 2
+    centro_y = (placa.Ny - 1) * placa.h / 2
+    raio_circulo = 0.3
+
+    Tc_ideal = placa.descobrir_Tc_para_Tmax(
+        T_alvo=T_estrela, 
+        T_top=100.0, T_bottom=0.0, T_left=50.0, T_right=50.0,
+        raio=raio_circulo, cx=centro_x, cy=centro_y
+    )
 
     placa.resolver(T_top=100.0, T_bottom=0.0, T_left=50.0, T_right=50.0)
 
