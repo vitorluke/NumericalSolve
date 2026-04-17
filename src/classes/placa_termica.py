@@ -1,6 +1,7 @@
 from scipy import sparse
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 class PlacaTermica:
     def __init__(self, Nx: int, Ny: int, condutividade: float, h: float = 1.0, fonte_calor: float = 0.0):
@@ -122,12 +123,110 @@ class PlacaTermica:
             plt.savefig(filename)
 
         plt.show()
+    def gerar_historico_jacobi(self, T_top: float, T_bottom: float, T_left: float, T_right: float, max_iter: int = 150):
+        """Resolve a placa via Jacobi e retorna uma lista com o estado da malha a cada iteração."""
+        # Inicializa a malha com zeros
+        T = np.zeros((self.Nx, self.Ny))
+        
+        # Aplica as condições de contorno
+        T[:, 0] = T_bottom
+        T[:, -1] = T_top
+        T[0, :] = T_left
+        T[-1, :] = T_right
+        
+        # Dedução do termo fonte baseado na sua montagem: 4Tc - Te - Tw - Tn - Ts = (h^2 * f) / k
+        termo_fonte = (self.h ** 2 * self.fonte_calor) / self.k
+        historico = [T.copy()]
+
+        for _ in range(max_iter):
+            T_new = T.copy()
+            # Versão vetorizada e rápida do Jacobi (calcula tudo ao mesmo tempo usando o estado antigo)
+            T_new[1:-1, 1:-1] = 0.25 * (
+                T[2:, 1:-1] + T[:-2, 1:-1] + # Leste e Oeste
+                T[1:-1, 2:] + T[1:-1, :-2] + # Norte e Sul
+                termo_fonte
+            )
+            T = T_new
+            historico.append(T.copy())
+            
+        return historico
+
+    def gerar_historico_gauss_seidel(self, T_top: float, T_bottom: float, T_left: float, T_right: float, max_iter: int = 150):
+        """Resolve a placa via Gauss-Seidel e retorna uma lista com o estado da malha a cada iteração."""
+        T = np.zeros((self.Nx, self.Ny))
+        
+        T[:, 0] = T_bottom
+        T[:, -1] = T_top
+        T[0, :] = T_left
+        T[-1, :] = T_right
+        
+        termo_fonte = (self.h ** 2 * self.fonte_calor) / self.k
+        historico = [T.copy()]
+
+        for _ in range(max_iter):
+            for i in range(1, self.Nx - 1):
+                for j in range(1, self.Ny - 1):
+                    T[i, j] = 0.25 * (
+                        T[i+1, j] + T[i-1, j] + 
+                        T[i, j+1] + T[i, j-1] + 
+                        termo_fonte
+                    )
+            historico.append(T.copy())
+            
+        return historico
+
+    def animar_comparacao(self, hist_jacobi, hist_gs, intervalo_ms: int = 50, filename: str = None):
+        """Gera uma animação lado a lado comparando as iterações."""
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        
+        Lx = (self.Nx - 1) * self.h
+        Ly = (self.Ny - 1) * self.h
+        X, Y = np.meshgrid(np.linspace(0.0, Lx, self.Nx), np.linspace(0.0, Ly, self.Ny))
+        
+        vmin = min(np.min(hist_jacobi), np.min(hist_gs))
+        vmax = max(np.max(hist_jacobi), np.max(hist_gs))
+        
+        def update(frame):
+            ax1.clear()
+            ax2.clear()
+            
+            contorno1 = ax1.contourf(X, Y, hist_jacobi[frame].T, 20, cmap='jet', vmin=vmin, vmax=vmax)
+            contorno2 = ax2.contourf(X, Y, hist_gs[frame].T, 20, cmap='jet', vmin=vmin, vmax=vmax)
+            
+            ax1.set_title(f"Jacobi (Iteração {frame})")
+            ax2.set_title(f"Gauss-Seidel (Iteração {frame})")
+            
+            for ax in [ax1, ax2]:
+                ax.set_aspect('equal')
+                ax.set(xlabel='x', ylabel='y')
+                ax.set_xticks([0, Lx/2, Lx])
+                ax.set_yticks([0, Ly/2, Ly])
+                
+            return contorno1, contorno2
+
+        frames_totais = min(len(hist_jacobi), len(hist_gs))
+        ani = animation.FuncAnimation(fig, update, frames=frames_totais, interval=intervalo_ms, repeat=False)
+        
+        contorno_base = ax1.contourf(X, Y, hist_jacobi[0].T, 20, cmap='jet', vmin=vmin, vmax=vmax)
+        fig.colorbar(contorno_base, ax=[ax1, ax2], orientation='horizontal', shrink=0.6, pad=0.15)
+        
+        if filename:
+            ani.save(filename, writer='pillow')
+            print(f"Animação salva como {filename}")
+            
+        plt.show()
 
 
 if __name__ == "__main__":
     placa = PlacaTermica(Nx=21, Ny=21, condutividade=0.25, h=0.1)
 
     placa.resolver(T_top=100.0, T_bottom=0.0, T_left=50.0, T_right=50.0)
+
+    historico_jac = placa.gerar_historico_jacobi(T_top=100.0, T_bottom=0.0, T_left=50.0, T_right=50.0, max_iter=200)
+
+    historico_gs = placa.gerar_historico_gauss_seidel(T_top=100.0, T_bottom=0.0, T_left=50.0, T_right=50.0, max_iter=200)
+
+    placa.animar_comparacao(historico_jac, historico_gs, intervalo_ms=40)
     
     placa.plotaPlaca(flag_type='contour')
     placa.plotaPlaca(flag_type='surface')

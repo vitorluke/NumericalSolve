@@ -34,4 +34,3 @@ def gauss_seidel_iteration(A: npt.ArrayLike, b: npt.ArrayLike, x: npt.ArrayLike)
         out_x[i] = (b[i] - sum_term) / A[i][i]
     return out_x
 
-
