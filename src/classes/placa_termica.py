@@ -2,27 +2,42 @@ from scipy import sparse
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+import time
 
 class PlacaTermica:
-    def __init__(self, Nx: int, Ny: int, k, h: float = 1.0, fonte_calor: float = 0.0):
+    def __init__(self, Lx:float, Ly:float, Nx: int, Ny: int, k, fonte_calor: float = 0.0):
         """Construtor da classe da placa térmica."""
+        self.Lx = Lx
+        self.Ly = Ly
+        
         self.Nx = Nx
         self.Ny = Ny
         self.N_total = Nx * Ny
+ 
+        self.hx = Lx / (Nx - 1)
+        self.hy = Ly / (Ny - 1)
+
+        self.ds = self.hx * self.hy
+
         self.k = k
-        self.h = h # Espaçamento da grade
+
         self.fonte_calor = fonte_calor # Termo f(x,y)
-        
+
         self.matriz_global = None
-        self.vetor_fonte = None
+        self.vetor_fonte = None        
         self.temperaturas = None
 
+        self.tempos_execucao = {}
+
     def flatten_coordinate(self, i: int, j: int) -> int:
-        """Converte as coordenadas 2D (i, j) para um índice linear 1D."""
         return i + j * self.Nx
 
     def assembly(self):
         """Monta a matriz global do sistema e o vetor do lado direito."""
+        tempo_inicio = time.time()
+
         self.matriz_global = np.zeros((self.N_total, self.N_total))
         self.vetor_fonte = np.zeros(self.N_total)
 
@@ -30,6 +45,10 @@ class PlacaTermica:
             self.assembly_variavel()
         else:
             self.assembly_uniforme()
+
+        tempo_fim = time.time()
+
+        self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
 
     def assembly_uniforme(self):
         """Monta a matriz global sistema e o vetor, quando k é constante."""
@@ -53,7 +72,7 @@ class PlacaTermica:
         for i in range(1, self.Nx - 1, 1):
             for j in range(1, self.Ny - 1, 1):
                 ic = self.flatten_coordinate(i, j)
-                self.vetor_fonte[ic] = (self.h ** 2) * self.fonte_calor
+                self.vetor_fonte[ic] = (self.ds) * self.fonte_calor
 
     def assembly_variavel(self):
         """Monta a matriz global sistema e o vetor, quando k é função de i e j."""
@@ -68,79 +87,93 @@ class PlacaTermica:
                     i_n = self.flatten_coordinate(i, j + 1)
                     i_s = self.flatten_coordinate(i, j - 1)
                     
-                    k = self.k(i, j)
+                    x = i * self.Nx
+                    y = j * self.Ny
 
-                    self.matriz_global[ic, ic]  =  4.0 * k
+                    k_e = self.k(x + self.hx / 2, y)
+                    k_w = self.k(x - self.hx / 2, y)
+                    k_n = self.k(x, y + self.hy / 2)
+                    k_s = self.k(x, y - self.hy / 2)
 
-                    self.matriz_global[ic, i_e] = -1.0 * k
-                    self.matriz_global[ic, i_w] = -1.0 * k
-                    self.matriz_global[ic, i_n] = -1.0 * k
-                    self.matriz_global[ic, i_s] = -1.0 * k
+                    coef_central = k_e + k_w + k_n + k_s
+
+                    self.matriz_global[ic, ic]  =  coef_central
+
+                    self.matriz_global[ic, i_e] = -k_e
+                    self.matriz_global[ic, i_w] = -k_w
+                    self.matriz_global[ic, i_n] = -k_n
+                    self.matriz_global[ic, i_s] = -k_s
                     
-                    self.vetor_fonte[ic] = (self.h ** 2) * self.fonte_calor
+                    self.vetor_fonte[ic] = (self.ds) * self.fonte_calor
                 else:
-                    # nó da borda (termicamente isolada)
+                    # borda termicamente isolada
                     self.matriz_global[ic, ic] = 1.0
                     self.vetor_fonte[ic] = 0.0
 
-    def resolver(self, boundary:list[(int, float)]):
+    def resolver(self, fronteira:list[(int, float)], use_sparse:bool=True):
         """Aplica as condições de contorno e resolve o sistema linear."""
         if self.matriz_global is None:
             self.assembly()
 
+        tempo_inicio = time.time()
+
         matriz_modificada = self.matriz_global.copy()
         vetor_modificado = self.vetor_fonte.copy()
 
-        for (ic, T) in boundary:
+        for (ic, T) in fronteira:
             matriz_modificada[ic, :]  = 0.0
             matriz_modificada[ic, ic] = 1.0
 
             vetor_modificado[ic]      = T
 
-        matriz_esparsa = sparse.csr_matrix(matriz_modificada)
-        self.temperaturas = sparse.linalg.spsolve(matriz_esparsa, vetor_modificado)
+        if use_sparse:
+            matriz_esparsa = sparse.csr_matrix(matriz_modificada, shape = (self.N_total, self.N_total))
+            self.temperaturas = sparse.linalg.spsolve(matriz_esparsa, vetor_modificado)
+        else:
+            self.temperaturas = np.linalg.solve(matriz_modificada, vetor_modificado)
+
+        tempo_fim = time.time()
+
+        self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
+        self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
 
         return self.temperaturas
-        
 
-    def plota_placa(self, flag_type='contour', filename=None):
+    def temp_max(self):
+        if self.temperaturas is None:
+            return None
+        else:
+            return np.max(self.temperaturas)
+
+    def plota_placa(self, flag_type='contour', title='Distribuição de temperatura', filename=None):
         """Plota a dispersão de calor da placa (contour 2D ou surface 3D)."""
         if self.temperaturas is None:
-            print("Erro: Resolva a placa térmica antes de plotar.")
+            print("Erro: Resolva a placa antes de plotar.")
             return
 
-        # Calculando os comprimentos físicos da placa com base nos nós e no espaçamento
-        Lx = (self.Nx - 1) * self.h
-        Ly = (self.Ny - 1) * self.h
-
-        # Criando a malha de coordenadas
-        x = np.linspace(0.0, Lx, self.Nx)
-        y = np.linspace(0.0, Ly, self.Ny)
+        x = np.linspace(0.0, self.Lx, self.Nx)
+        y = np.linspace(0.0, self.Ly, self.Ny)
         X, Y = np.meshgrid(x, y)
-        
-        # Formatando o vetor de temperaturas (1D) para a matriz (2D) Ny x Nx
         Z = np.copy(self.temperaturas).reshape(self.Ny, self.Nx)
         
         if flag_type == 'contour':
-            fig, ax = plt.subplots(figsize=(6,6))
+            fig, ax = plt.subplots(figsize=(8,4))
             ax.set_aspect('equal')
-            ax.set(xlabel='x', ylabel='y', title='Contours of temperature')
+            ax.set(xlabel='x', ylabel='y', title=title)
             im = ax.contourf(X, Y, Z, 20, cmap='jet')
             im2 = ax.contour(X, Y, Z, 20, linewidths=0.25, colors='k')
             fig.colorbar(im, ax=ax, orientation='horizontal')
-            
         elif flag_type == 'surface':
             fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8,6))
             surf = ax.plot_surface(X, Y, Z, cmap='jet')
-            ax.set(xlabel='x', ylabel='y', zlabel='Temperatura', title='Superfície de Temperatura')
+            ax.set(xlabel='x', ylabel='y', zlabel='Temperatura', title=title)
             fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5) 
             
-        plt.xticks([0, Lx/2, Lx])
-        plt.yticks([0, Ly/2, Ly])
+        plt.xticks([0, self.Lx/2, self.Lx])
+        plt.yticks([0, self.Ly/2, self.Ly])
 
         if filename is not None:
             plt.savefig(filename)
-
         plt.show()
 
     def malha_iterativa(self, fronteira):
@@ -160,7 +193,7 @@ class PlacaTermica:
         T = self.malha_iterativa(fronteira=fronteira)
         
         # Dedução do termo fonte baseado na sua montagem: 4Tc - Te - Tw - Tn - Ts = (h^2 * f) / k
-        termo_fonte = (self.h ** 2 * self.fonte_calor) / self.k
+        termo_fonte = (self.ds * self.fonte_calor) / self.k
         historico = [T.copy()]
 
         for _ in range(max_iter):
@@ -180,7 +213,7 @@ class PlacaTermica:
         """Resolve a placa via Gauss-Seidel e retorna uma lista com o estado da malha a cada iteração."""
         T = self.malha_iterativa(fronteira=fronteira)
         
-        termo_fonte = (self.h ** 2 * self.fonte_calor) / self.k
+        termo_fonte = (self.ds * self.fonte_calor) / self.k
         historico = [T.copy()]
 
         for _ in range(max_iter):
@@ -199,8 +232,8 @@ class PlacaTermica:
         """Gera uma animação lado a lado comparando as iterações."""
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         
-        Lx = (self.Nx - 1) * self.h
-        Ly = (self.Ny - 1) * self.h
+        Lx = self.Lx
+        Ly = self.Ly
         X, Y = np.meshgrid(np.linspace(0.0, Lx, self.Nx), np.linspace(0.0, Ly, self.Ny))
         
         vmin = min(np.min(hist_jacobi), np.min(hist_gs))
@@ -248,9 +281,10 @@ class PlacaTermica:
             r  = raio,
             cx = cx,
             cy = cy,
-            h  = self.h,
             Nx = self.Nx,
-            Ny = self.Ny
+            Ny = self.Ny,
+            hx = self.hx,
+            hy = self.hy
         )
 
         fronteira_total = fronteira + circulo
@@ -296,7 +330,7 @@ class PlacaTermica:
             # Verifica se já chegamos perto o suficiente do alvo
             if abs(erro_novo) < tolerancia:
                 print(f"\n>>> SUCESSO! T_c ideal encontrado: {Tc_novo:.4f}°C")
-                self.temperaturas = mapa_temp.flatten() # Salva para poder usar o plotaPlaca
+                self.temperaturas = mapa_temp.flatten() # Salva para poder usar o plota_placa
                 return Tc_novo
             
             # Atualiza os valores para o próximo loop
@@ -305,16 +339,23 @@ class PlacaTermica:
 
         print("Aviso: Limite de iterações atingido sem convergir perfeitamente.")
         return Tc_1
+    
+    def get_central_profile(self):
+        """Retorna o perfil de temperaturas ao longo do eixo X central (y = Ly/2)."""
+        j_center = self.Ny // 2
+        Z = np.copy(self.temperaturas).reshape(self.Ny, self.Nx)
+        x = np.linspace(0.0, self.Lx, self.Nx)
+        return x, Z[j_center, :]
 
-def fronteira_padrao(Nx, Ny):
-    fronteira = []
+def borda_padrao(Nx:int, Ny:int):
+    borda = []
 
     for j in range(Ny):
         left = (j * Nx, 10.0)
         right = (Nx - 1 + j * Nx, 30.0)
 
-        fronteira.append(left)
-        fronteira.append(right)
+        borda.append(left)
+        borda.append(right)
 
     for i in range(Nx):
         T = 10.0 + 20.0 * (i / (Nx - 1))
@@ -322,29 +363,253 @@ def fronteira_padrao(Nx, Ny):
         top = (i, T)
         bottom = (i + (Ny - 1) * Nx, T)
 
-        fronteira.append(top)
-        fronteira.append(bottom)
+        borda.append(top)
+        borda.append(bottom)
 
-    return fronteira
+    return borda
 
-def circulo_constante(T:float, r:float, cx:float, cy:float, h:float, Nx:int, Ny:int):
-    fronteira = []
+def borda_constante(Nx:int, Ny:int, T:float):
+    borda = []
+
+    for j in range(Ny):
+        left = (j * Nx, T)
+        right = (Nx - 1 + j * Nx, T)
+
+        borda.append(left)
+        borda.append(right)
+
+    for i in range(Nx):
+        top = (i, T)
+        bottom = (i + (Ny - 1) * Nx, T)
+
+        borda.append(top)
+        borda.append(bottom)
+
+    return borda
+
+def circulo_constante(T:float, r:float, cx:float, cy:float, Nx:int, Ny:int, hx:float, hy:float):
+    circulo = []
 
     for i in range(Nx):
         for j in range(Ny):
-            x = i * h
-            y = j * h
+            x = i * hx
+            y = j * hy
 
             dist = (x - cx) ** 2 + (y - cy) ** 2
 
             if (dist <= r**2):
-                fronteira.append((i + j * Nx, T))
+                circulo.append((i + j * Nx, T))
 
-    return fronteira
+    return circulo
+
+# --- PARÂMETROS BASE SUGERIDOS ---
+Lx, Ly = 0.02, 0.01  # 2 cm x 1 cm em metros
+k_nominal = 0.25
+fonte_calor_nominal = 5e5
+
+raio_regiao_circular = 0.002
+
+def exercicio_1():
+    print("\n--- EXERCÍCIO 1 ---")
+    malhas = [(21, 11), (41, 21), (81, 41), (161, 81), (321, 161)]
+    
+    print(f"{'Malha':<12} | {'T_max':<8} | {'Tempo Esparsa (s)':<18} | {'Tempo Densa (s)':<15}")
+    print("-" * 65)
+    
+    for Nx, Ny in malhas:
+        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal)
+        temp_bordas = borda_padrao(Nx, Ny)
+        
+        # Teste com Matriz Esparsa
+        placa.resolver(temp_bordas)
+        tempo_esparsa = placa.tempos_execucao['total']
+        t_max = placa.temp_max()
+        
+        # Teste com Matriz Densa (CUIDADO com falta de memória para malhas grandes)
+        tempo_densa = "N/A (Memória)"
+        if Nx * Ny <= 20000: # Proteção contra MemoryError
+            placa.resolver(temp_bordas)
+            tempo_densa = f"{placa.tempos_execucao['total']:.5f}"
+        
+        print(f"({Nx}, {Ny})".ljust(12) + f" | {t_max:.2f}   | {tempo_esparsa:.5f}".ljust(22) + f" | {tempo_densa}")
+        
+        # Plotar apenas para uma malha intermediária para não abrir 50 janelas
+        if Nx == 81:
+            placa.plota_placa(title=f"Ex 1: Contorno para malha {Nx}x{Ny}")
+            
+            # Plotar temperatura no eixo central
+            x_perfil, T_perfil = placa.get_central_profile()
+            plt.figure(figsize=(6,4))
+            plt.plot(x_perfil, T_perfil, 'b-', label='y = Ly/2')
+            plt.title("Ex 1: Perfil de Temperatura no Eixo Central")
+            plt.xlabel("x")
+            plt.ylabel("Temperatura")
+            plt.grid(True)
+            plt.legend()
+            plt.show()
+
+def exercicio_2():
+    print("\n--- EXERCÍCIO 2 (Parâmetros do enunciado) ---")
+    malhas = [(41, 21), (81, 41), (161, 81)]
+
+    for Nx, Ny in malhas:
+        placa = PlacaTermica(
+            Lx,
+            Ly,
+            Nx,
+            Ny,
+            k=k_nominal,
+            fonte_calor=fonte_calor_nominal
+        )
+        
+        temp_bordas = borda_padrao(Nx, Ny)
+
+        circulo = circulo_constante(
+            T  = 30.0,
+            r  = raio_regiao_circular,
+            cx = 0.75 * placa.Lx,
+            cy = 0.5  * placa.Ly,
+            Nx = placa.Nx,
+            Ny = placa.Ny,
+            hx = placa.hx,
+            hy = placa.hy
+        )
+
+        fronteira_total = circulo + temp_bordas
+
+        placa.resolver(fronteira_total)
+        
+        print(f"Malha {Nx}x{Ny} -> T_max = {placa.temp_max():.2f}")
+        if Nx == 81:
+            placa.plota_placa(title=f"Ex 2: Região Circular (Malha {Nx}x{Ny})")
+            x_perfil, T_perfil = placa.get_central_profile()
+            plt.figure()
+            plt.plot(x_perfil, T_perfil, 'r-', label='Com Cilindro')
+            plt.title("Ex 2: Perfil Central")
+            plt.legend()
+            plt.grid()
+            plt.show()
+
+def exercicio_3():
+    print("\n--- EXERCÍCIO 3 (Condutividade Variável) ---")
+    
+    def k_variavel(x, y):
+        return 0.2 + 0.05 * np.sin(3*np.pi*x / Lx) * np.sin(3*np.pi*y / Ly)
+
+    Nx = 81
+    Ny = 41
+
+    placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_variavel)
+
+    temp_bordas = borda_padrao(Nx, Ny)
+
+    placa.resolver(temp_bordas)
+    
+    print(f"Temperatura Máxima com k variável: {placa.temp_max():.2f}")
+    placa.plota_placa(title="Ex 3: K Variável")
+
+def exercicio_4():
+    print("\n--- EXERCÍCIO 4 (Influência de T_C) ---")
+    Nx, Ny = 101, 51
+    temperaturas_Tc = np.linspace(0, 100, 10)
+    maximas = []
+    medias = []
+    
+    for Tc in temperaturas_Tc:
+        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal)
+
+        temp_bordas = borda_padrao(Nx, Ny)
+
+        circulo = circulo_constante(
+            T  = Tc,
+            r  = raio_regiao_circular,
+            cx = 0.75 * placa.Lx,
+            cy = 0.5  * placa.Ly,
+            Nx = placa.Nx,
+            Ny = placa.Ny,
+            hx = placa.hx,
+            hy = placa.hy
+        )
+
+        fronteira_total = circulo + temp_bordas
+
+        placa.resolver(fronteira_total)
+
+        maximas.append(placa.temp_max())
+        medias.append(placa.temp_max())
+        
+    plt.figure(figsize=(6,4))
+    plt.plot(temperaturas_Tc, maximas, 'r-o', label='T_max')
+    plt.plot(temperaturas_Tc, medias, 'b-o', label='T_media')
+    plt.xlabel('Temperatura no Cilindro (T_C)')
+    plt.ylabel('Temperatura na Placa')
+    plt.title('Ex 4: T_max e T_media vs T_C')
+    plt.grid()
+    plt.legend()
+    plt.show()
+
+def exercicio_5():
+    print("\n--- EXERCÍCIO 5 (Linearidade Tk = a*TR + b*TC + c) ---")
+    # Para encontrar 3 coeficientes (a,b,c), precisamos de 3 "experimentos"
+    # TR representa a temperatura das bordas (vamos assumir todas iguais para simplificar)
+    Nx, Ny = 81, 41
+    
+    ic_escolhido = 233 # Índice do nó arbitrário interno
+    
+    casos = [
+        {'TR': 10, 'TC': 20},
+        {'TR': 50, 'TC': 20},
+        {'TR': 10, 'TC': 80}
+    ]
+    T_obs = []
+    
+    for c in casos:
+        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal)
+
+        borda = borda_constante(Nx, Ny, c['TR'])
+        circulo = circulo_constante(
+            T  = c['TC'],
+            r  = raio_regiao_circular,
+            cx = 0.75 * placa.Lx,
+            cy = 0.5  * placa.Ly,
+            Nx = placa.Nx,
+            Ny = placa.Ny,
+            hx = placa.hx,
+            hy = placa.hy
+        )
+
+        fronteira_total = borda + circulo
+        
+        placa.resolver(fronteira_total)
+        T_obs.append(placa.temperaturas[ic_escolhido])
+        
+    # Monta sistema linear para encontrar a, b e c:
+    # [TR1, TC1, 1] [a] = [Tk1]
+    # [TR2, TC2, 1] [b] = [Tk2]
+    # [TR3, TC3, 1] [c] = [Tk3]
+    Matriz_coefs = np.array([
+        [casos[0]['TR'], casos[0]['TC'], 1],
+        [casos[1]['TR'], casos[1]['TC'], 1],
+        [casos[2]['TR'], casos[2]['TC'], 1]
+    ])
+    Vetor_Tks = np.array(T_obs)
+    
+    a, b, c_coef = np.linalg.solve(Matriz_coefs, Vetor_Tks)
+    print(f"Nó k={ic_escolhido}")
+    print(f"Coeficientes calculados: a = {a:.4f}, b = {b:.4f}, c = {c_coef:.4f}")
+    print(f"Equação: Tk = {a:.4f}*TR + {b:.4f}*TC + {c_coef:.4f}")
 
 if __name__ == "__main__":
+
+    # exercicio_1()
+    # exercicio_2()
+    # exercicio_3()
+    # exercicio_4()
+    # exercicio_5()
+
+    """
     placa = PlacaTermica(Nx=41, Ny=21, k=0.25, h=0.1)
-    fronteira = fronteira_padrao(placa.Nx, placa.Ny)
+    fronteira = borda_padrao(placa.Nx, placa.Ny)
 
     T_estrela = 150.0
 
@@ -368,3 +633,4 @@ if __name__ == "__main__":
     
     placa.plota_placa(flag_type='contour')
     placa.plota_placa(flag_type='surface')
+    """
