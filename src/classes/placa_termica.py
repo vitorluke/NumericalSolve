@@ -529,7 +529,7 @@ def exercicio_1():
     print("\n--- EXERCÍCIO 1 ---")
     malhas = [(21, 11), (41, 21), (81, 41), (161, 81), (321, 161)]
     
-    print(f"{'Malha':<12} | {'T_max':<8} | {'Tempo Esparsa (s)':<18} | {'Tempo Densa (s)':<15}")
+    print(f"{'Malha':<12} | {'T_max':<7} | {'Tempo Esparsa (s)':<18} | {'Tempo Densa (s)':<15}")
     print("-" * 65)
     
     for Nx, Ny in malhas:
@@ -547,7 +547,7 @@ def exercicio_1():
             placa.resolver(temp_bordas)
             tempo_densa = f"{placa.tempos_execucao['total']:.5f}"
         
-        print(f"({Nx}, {Ny})".ljust(12) + f" | {t_max:.2f}   | {tempo_esparsa:.5f}".ljust(22) + f" | {tempo_densa}")
+        print(f"({Nx}, {Ny})".ljust(12) + f" | {t_max:.2f}   | {tempo_esparsa:.5f}".ljust(31) + f" | {tempo_densa}")
         
         # Plotar apenas para uma malha intermediária para não abrir 50 janelas
         if Nx == 321:
@@ -716,7 +716,7 @@ def exercicio_5():
     print(f"Equação: Tk = {a:.4f}*TR + {b:.4f}*TC + {c_coef:.4f}")
 
 if __name__ == "__main__":
-    exercicio_1()
+    # exercicio_1()
     # exercicio_2()
     # exercicio_3()
     # exercicio_4()
@@ -728,9 +728,9 @@ if __name__ == "__main__":
     # T_estrela = 39.5
 
     # Tc_ideal = placa.descobrir_Tc_para_Tmax(
-    #     T_alvo=T_estrela, 
-    #     fronteira=fronteira,
-    #     raio=raio_circulo, cx=x_circulo, cy=y_circulo
+        # T_alvo=T_estrela, 
+        # fronteira=fronteira,
+        # raio=raio_circulo, cx=x_circulo, cy=y_circulo
     # )
 
     # placa.resolver(fronteira)
