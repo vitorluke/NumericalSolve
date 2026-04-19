@@ -716,7 +716,7 @@ def exercicio_5():
     print(f"Equação: Tk = {a:.4f}*TR + {b:.4f}*TC + {c_coef:.4f}")
 
 if __name__ == "__main__":
-    # exercicio_1()
+    exercicio_1()
     # exercicio_2()
     # exercicio_3()
     # exercicio_4()
