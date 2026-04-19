@@ -152,7 +152,7 @@ class PlacaTermica:
 
         for (ic, T) in fronteira:
             i = ic %  self.Nx
-            j = ic // self.Ny
+            j = ic // self.Nx
 
             malha[i, j]  = T
 
@@ -321,7 +321,7 @@ def fronteira_padrao(Nx, Ny):
         fronteira.append(right)
 
     for i in range(Nx):
-        T = 10.0 + 20.0 * (i / (Ny - 1))
+        T = 10.0 + 20.0 * (i / (Nx - 1))
 
         top = (i, T)
         bottom = (i + (Ny - 1) * Nx, T)
@@ -347,7 +347,7 @@ def circulo_constante(T:float, r:float, cx:float, cy:float, h:float, Nx:int, Ny:
     return fronteira
 
 if __name__ == "__main__":
-    placa = PlacaTermica(Nx=21, Ny=21, k=0.25, h=0.1)
+    placa = PlacaTermica(Nx=41, Ny=21, k=0.25, h=0.1)
     fronteira = fronteira_padrao(placa.Nx, placa.Ny)
 
     T_estrela = 150.0
