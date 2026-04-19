@@ -150,9 +150,6 @@ class PlacaTermica:
         self.b = np.zeros(self.N_total)
 
         for (ic, T) in fronteira:
-            if ic in rows:
-                continue
-            
             rows.append(ic)
             cols.append(ic)
             data.append(1.0)
