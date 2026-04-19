@@ -265,14 +265,14 @@ class PlacaTermica:
         if flag_type == 'contour':
             fig, ax = plt.subplots(figsize=(8,4))
             ax.set_aspect('equal')
-            ax.set(xlabel='x', ylabel='y', title=title)
+            ax.set(xlabel='x (m)', ylabel='y (m)', title=title)
             im = ax.contourf(X, Y, Z, 20, cmap='jet')
             im2 = ax.contour(X, Y, Z, 20, linewidths=0.25, colors='k')
             fig.colorbar(im, ax=ax, orientation='horizontal')
         elif flag_type == 'surface':
             fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8,6))
             surf = ax.plot_surface(X, Y, Z, cmap='jet')
-            ax.set(xlabel='x', ylabel='y', zlabel='Temperatura', title=title)
+            ax.set(xlabel='x', ylabel='y', zlabel='Temperatura (K)', title=title)
             fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5) 
             
         plt.xticks([0, self.Lx/2, self.Lx])
@@ -366,7 +366,7 @@ class PlacaTermica:
         frames_totais = min(len(hist_jacobi), len(hist_gs))
         ani = animation.FuncAnimation(fig, update, frames=frames_totais, interval=intervalo_ms, repeat=False)
         
-        contorno_base = ax1.contourf(X, Y, hist_jacobi[0].T, 20, cmap='jet')
+        contorno_base = ax1.contourf(X, Y, hist_jacobi[-1].T, 20, cmap='jet')
         fig.colorbar(contorno_base, ax=[ax1, ax2], orientation='horizontal', shrink=0.6, pad=0.15)
         
         if filename:
@@ -452,6 +452,17 @@ class PlacaTermica:
         Z = np.copy(self.temperaturas).reshape(self.Ny, self.Nx)
         x = np.linspace(0.0, self.Lx, self.Nx)
         return x, Z[j_center, :]
+    
+    def plota_eixo_central(self, title:str):
+        x_perfil, T_perfil = self.get_central_profile()
+        plt.figure(figsize=(6,4))
+        plt.plot(x_perfil, T_perfil, 'b-', label='Temperatura em y = Ly/2')
+        plt.title(title)
+        plt.xlabel("x (m)")
+        plt.ylabel("Temperatura (K)")
+        plt.grid(True)
+        plt.legend()
+        plt.show()
 
 def borda_padrao(Nx:int, Ny:int):
     borda = []
@@ -545,18 +556,8 @@ def exercicio_1():
         
         # Plotar apenas para uma malha intermediária para não abrir 50 janelas
         if Nx == 641:
-            placa.plota_placa(title=f"Ex 1: Contorno para malha {Nx}x{Ny}")
-            
-            # Plotar temperatura no eixo central
-            x_perfil, T_perfil = placa.get_central_profile()
-            plt.figure(figsize=(6,4))
-            plt.plot(x_perfil, T_perfil, 'b-', label='y = Ly/2')
-            plt.title("Ex 1: Perfil de Temperatura no Eixo Central")
-            plt.xlabel("x")
-            plt.ylabel("Temperatura")
-            plt.grid(True)
-            plt.legend()
-            plt.show()
+            placa.plota_placa(title=f"Ex 1: Distribuição de temperatura (K) na malha {Nx}x{Ny}")
+            placa.plota_eixo_central("Ex 1: Perfil de temperaturas no eixo central")
 
 def exercicio_2(T_c:float=30.0):
     print("\n--- EXERCÍCIO 2 (Parâmetros do enunciado) ---")
@@ -591,14 +592,8 @@ def exercicio_2(T_c:float=30.0):
         
         print(f"Malha {Nx}x{Ny} -> T_max = {placa.temp_max():.2f}")
         if Nx == 161:
-            placa.plota_placa(title=f"Ex 2: Região Circular (Malha {Nx}x{Ny})")
-            x_perfil, T_perfil = placa.get_central_profile()
-            plt.figure()
-            plt.plot(x_perfil, T_perfil, 'r-', label='Com Cilindro')
-            plt.title("Ex 2: Perfil Central")
-            plt.legend()
-            plt.grid()
-            plt.show()
+            placa.plota_placa(title=f"Ex 2: Distribuição de temperaturas (K) com disco constante (Malha {Nx}x{Ny})")
+            placa.plota_eixo_central("Ex 2: Perfil de temperaturas no eixo central")
 
 def exercicio_3():
     print("\n--- EXERCÍCIO 3 (Condutividade Variável) ---")
@@ -616,7 +611,8 @@ def exercicio_3():
     placa.resolver(temp_bordas)
     
     print(f"Temperatura Máxima com k variável: {placa.temp_max():.2f}")
-    placa.plota_placa(title="Ex 3: K Variável")
+    placa.plota_placa(title="Ex 3: Distribuição de temperaturas (K) com k variável")
+    placa.plota_eixo_central("Ex 3: Eixo central de temperaturas (k variável)")
 
 def exercicio_4():
     print("\n--- EXERCÍCIO 4 (Influência de T_C) ---")
@@ -651,9 +647,9 @@ def exercicio_4():
     plt.figure(figsize=(6,4))
     plt.plot(temperaturas_Tc, maximas, 'r-o', label='T_max')
     plt.plot(temperaturas_Tc, medias, 'b-o', label='T_media')
-    plt.xlabel('Temperatura no Cilindro (T_C)')
-    plt.ylabel('Temperatura na Placa')
-    plt.title('Ex 4: T_max e T_media vs T_C')
+    plt.xlabel('Temperatura T_c no Cilindro (K)')
+    plt.ylabel('Temperatura (K)')
+    plt.title('Ex 4: T_max e T_media por T_c')
     plt.grid()
     plt.legend()
     plt.show()
@@ -710,7 +706,8 @@ def exercicio_5():
     print(f"Equação: Tk = {a:.4f}*TR + {b:.4f}*TC + {c_coef:.4f}")
 
 def exercicio_2_extra(T_estrela:float=39.5):
-    placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
+    print("\n--- EXERCÍCIO 2 EXTRA (Otimizar T_c) ---")
+    placa = PlacaTermica(Nx=161, Ny=81, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
     fronteira = borda_padrao(placa.Nx, placa.Ny)
 
     Tc_ideal = placa.descobrir_Tc_para_Tmax(
@@ -722,6 +719,7 @@ def exercicio_2_extra(T_estrela:float=39.5):
     return Tc_ideal
 
 def exercicio_3_extra():
+    print("\n--- EXERCÍCIO 3 EXTRA (Animação dos métodos iterativos) ---")
     placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
     fronteira = borda_padrao(placa.Nx, placa.Ny)
 
@@ -735,11 +733,11 @@ def exercicio_3_extra():
     placa.plota_placa(flag_type='surface')
 
 if __name__ == "__main__":
-    # exercicio_1()
+    exercicio_1()
     # exercicio_2(T_c=30.0)
     # exercicio_3()
     # exercicio_4()
     # exercicio_5()
 
     # exercicio_2_extra(T_estrela=39.5)
-    exercicio_3_extra()
+    # exercicio_3_extra()
