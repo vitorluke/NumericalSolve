@@ -25,8 +25,8 @@ class PlacaTermica:
 
         self.fonte_calor = fonte_calor # Termo f(x,y)
 
-        self.matriz_global = None
-        self.vetor_fonte = None        
+        self.A = None
+        self.b = None        
         self.temperaturas = None
 
         self.tempos_execucao = {}
@@ -34,61 +34,146 @@ class PlacaTermica:
     def flatten_coordinate(self, i: int, j: int) -> int:
         return i + j * self.Nx
 
-    def assembly(self):
-        """Monta a matriz global do sistema e o vetor do lado direito."""
+    def montar_densa(self, fronteira):
         tempo_inicio = time.time()
 
-        self.matriz_global = np.zeros((self.N_total, self.N_total))
-        self.vetor_fonte = np.zeros(self.N_total)
+        self.A = np.zeros((self.N_total, self.N_total))
+        self.b = np.zeros(self.N_total)
 
         if callable(self.k):
-            self.assembly_variavel()
+            self.montar_densa_variavel()
         else:
-            self.assembly_uniforme()
+            self.montar_densa_uniforme()
+
+        for (ic, T) in fronteira:
+            self.A[ic, :]  = 0.0
+            self.A[ic, ic] = 1.0
+
+            self.b[ic] = T
 
         tempo_fim = time.time()
 
         self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
 
-    def assembly_uniforme(self):
-        """Monta a matriz global sistema e o vetor, quando k é constante."""
+    def montar_densa_uniforme(self):
         d1 =  np.ones(self.N_total) * 4.0 * self.k
         d2 = -np.ones(self.N_total - 1) * self.k
         d3 = -np.ones(self.N_total - self.Nx) * self.k
 
-        np.fill_diagonal(self.matriz_global, d1)
+        np.fill_diagonal(self.A, d1)
 
         N = self.N_total
 
         idx = np.arange(N - 1)
-        self.matriz_global[idx + 1, idx] = d2
-        self.matriz_global[idx, idx + 1] = d2
+        self.A[idx + 1, idx] = d2
+        self.A[idx, idx + 1] = d2
 
         k = self.Nx
         idx_k = np.arange(N - k)
-        self.matriz_global[idx_k + k, idx_k] = d3
-        self.matriz_global[idx_k, idx_k + k] = d3
+        self.A[idx_k + k, idx_k] = d3
+        self.A[idx_k, idx_k + k] = d3
         
         for i in range(1, self.Nx - 1, 1):
             for j in range(1, self.Ny - 1, 1):
                 ic = self.flatten_coordinate(i, j)
-                self.vetor_fonte[ic] = (self.ds) * self.fonte_calor
+                self.b[ic] = self.ds * self.fonte_calor
 
-    def assembly_variavel(self):
-        """Monta a matriz global sistema e o vetor, quando k é função de i e j."""
-        for i in range(self.Nx):
-            for j in range(self.Ny):
+    def montar_densa_variavel(self):        
+        for i in range(1, self.Nx - 1):
+            for j in range(1, self.Ny - 1):
                 ic = self.flatten_coordinate(i, j)
                 
-                if 0 < i < self.Nx - 1 and 0 < j < self.Ny - 1:
-                    # nó interno
+                i_e = self.flatten_coordinate(i + 1, j)
+                i_w = self.flatten_coordinate(i - 1, j)
+                i_n = self.flatten_coordinate(i, j + 1)
+                i_s = self.flatten_coordinate(i, j - 1)
+                    
+                x = i * self.hx
+                y = j * self.hy
+
+                k_e = self.k(x + self.hx / 2, y)
+                k_w = self.k(x - self.hx / 2, y)
+                k_n = self.k(x, y + self.hy / 2)
+                k_s = self.k(x, y - self.hy / 2)
+
+                coef_central = k_e + k_w + k_n + k_s
+
+                self.A[ic, ic]  =  coef_central
+
+                self.A[ic, i_e] = -k_e
+                self.A[ic, i_w] = -k_w
+                self.A[ic, i_n] = -k_n
+                self.A[ic, i_s] = -k_s
+                    
+                self.b[ic] = (self.ds) * self.fonte_calor
+
+        """
+        # Impõe por padrão uma temperatura 0 nas bordas
+
+        for i in range(self.Nx):
+            i_top = self.flatten_coordinate(i, 0)
+            i_bottom = self.flatten_coordinate(i, self.Ny - 1)
+
+            self.A[i_top, i_top] = 1.0
+            self.A[i_bottom, i_bottom] = 1.0
+
+        for j in range(self.Ny):
+            i_left = self.flatten_coordinate(0, j)
+            i_right = self.flatten_coordinate(self.Nx - 1, j)
+
+            self.A[i_left, i_left] = 1.0
+            self.A[i_right, i_right] = 1.0
+
+        """
+
+    def resolver_densa(self, fronteira:list[(int, float)]):
+        self.montar_densa(fronteira)
+
+        tempo_inicio = time.time()
+
+        self.temperaturas = np.linalg.solve(self.A, self.b)
+
+        tempo_fim = time.time()
+
+        self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
+        self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
+
+        return self.temperaturas
+    
+    def montar_esparsa(self, fronteira:list[(int, float)]):
+        tempo_inicio = time.time()
+
+        rows = []
+        cols = []
+        data = []
+
+        self.b = np.zeros(self.N_total)
+
+        for (ic, T) in fronteira:
+            if ic in rows:
+                continue
+            
+            rows.append(ic)
+            cols.append(ic)
+            data.append(1.0)
+
+            self.b[ic] = T
+
+        if (callable(self.k)):
+            for i in range(1, self.Nx - 1):
+                for j in range(1, self.Ny - 1):
+                    ic = self.flatten_coordinate(i, j)
+
+                    if any(r == ic for r, _ in fronteira):
+                        continue
+
                     i_e = self.flatten_coordinate(i + 1, j)
                     i_w = self.flatten_coordinate(i - 1, j)
                     i_n = self.flatten_coordinate(i, j + 1)
                     i_s = self.flatten_coordinate(i, j - 1)
                     
-                    x = i * self.Nx
-                    y = j * self.Ny
+                    x = i * self.hx
+                    y = j * self.hy
 
                     k_e = self.k(x + self.hx / 2, y)
                     k_w = self.k(x - self.hx / 2, y)
@@ -97,40 +182,58 @@ class PlacaTermica:
 
                     coef_central = k_e + k_w + k_n + k_s
 
-                    self.matriz_global[ic, ic]  =  coef_central
+                    rows.extend([ic, ic, ic, ic, ic])
+                    cols.extend([ic, i_e, i_w, i_n, i_s])
+                    data.extend([coef_central, -k_e, -k_w, -k_n, -k_s])
 
-                    self.matriz_global[ic, i_e] = -k_e
-                    self.matriz_global[ic, i_w] = -k_w
-                    self.matriz_global[ic, i_n] = -k_n
-                    self.matriz_global[ic, i_s] = -k_s
+                    self.b[ic] = (self.ds) * self.fonte_calor
+        else:
+            k = self.k
+
+            for i in range(1, self.Nx - 1):
+                for j in range(1, self.Ny - 1):
+                    ic = self.flatten_coordinate(i, j)
+
+                    if any(r == ic for r, _ in fronteira):
+                        continue
+
+                    i_e = self.flatten_coordinate(i + 1, j)
+                    i_w = self.flatten_coordinate(i - 1, j)
+                    i_n = self.flatten_coordinate(i, j + 1)
+                    i_s = self.flatten_coordinate(i, j - 1)
                     
-                    self.vetor_fonte[ic] = (self.ds) * self.fonte_calor
-                else:
-                    # borda termicamente isolada
-                    self.matriz_global[ic, ic] = 1.0
-                    self.vetor_fonte[ic] = 0.0
+                    rows.extend([ic, ic, ic, ic, ic])
+                    cols.extend([ic, i_e, i_w, i_n, i_s])
+                    data.extend([4.0 * k, -k, -k, -k, -k])
 
-    def resolver(self, fronteira:list[(int, float)], use_sparse:bool=True):
-        """Aplica as condições de contorno e resolve o sistema linear."""
-        if self.matriz_global is None:
-            self.assembly()
+                    self.b[ic] = (self.ds) * self.fonte_calor
+
+        self.A = sparse.csr_matrix((data, (rows, cols)), shape=(self.N_total, self.N_total))
+
+        tempo_fim = time.time()
+
+        self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
+
+        return self.temperaturas
+
+    def resolver_esparsa(self, fronteira:list[(int, float)]):
+        self.montar_esparsa(fronteira)
+
+        """
+        tempo_inicio = time.time()
+
+        self.montar_densa(fronteira)
+        self.A = sparse.csr_matrix(self.A)
+
+        tempo_fim = time.time()
+
+        self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
+
+        """
 
         tempo_inicio = time.time()
 
-        matriz_modificada = self.matriz_global.copy()
-        vetor_modificado = self.vetor_fonte.copy()
-
-        for (ic, T) in fronteira:
-            matriz_modificada[ic, :]  = 0.0
-            matriz_modificada[ic, ic] = 1.0
-
-            vetor_modificado[ic]      = T
-
-        if use_sparse:
-            matriz_esparsa = sparse.csr_matrix(matriz_modificada, shape = (self.N_total, self.N_total))
-            self.temperaturas = sparse.linalg.spsolve(matriz_esparsa, vetor_modificado)
-        else:
-            self.temperaturas = np.linalg.solve(matriz_modificada, vetor_modificado)
+        self.temperaturas = sparse.linalg.spsolve(self.A, self.b)
 
         tempo_fim = time.time()
 
@@ -138,12 +241,24 @@ class PlacaTermica:
         self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
 
         return self.temperaturas
+    
+    def resolver(self, fronteira:list[(int, float)], use_sparse:bool=True):
+        if use_sparse:
+            return self.resolver_esparsa(fronteira)
+        else:
+            return self.resolver_densa(fronteira)
 
     def temp_max(self):
         if self.temperaturas is None:
             return None
         else:
             return np.max(self.temperaturas)
+
+    def temp_med(self):
+        if self.temperaturas is None:
+            return None
+        else:
+            return np.average(self.temperaturas)
 
     def plota_placa(self, flag_type='contour', title='Distribuição de temperatura', filename=None):
         """Plota a dispersão de calor da placa (contour 2D ou surface 3D)."""
@@ -357,7 +472,7 @@ def borda_padrao(Nx:int, Ny:int):
         borda.append(left)
         borda.append(right)
 
-    for i in range(Nx):
+    for i in range(1, Nx - 1):
         T = 10.0 + 20.0 * (i / (Nx - 1))
 
         top = (i, T)
@@ -378,7 +493,7 @@ def borda_constante(Nx:int, Ny:int, T:float):
         borda.append(left)
         borda.append(right)
 
-    for i in range(Nx):
+    for i in range(1, Nx - 1):
         top = (i, T)
         bottom = (i + (Ny - 1) * Nx, T)
 
@@ -390,24 +505,28 @@ def borda_constante(Nx:int, Ny:int, T:float):
 def circulo_constante(T:float, r:float, cx:float, cy:float, Nx:int, Ny:int, hx:float, hy:float):
     circulo = []
 
+    r_squared = r ** 2
+
     for i in range(Nx):
         for j in range(Ny):
             x = i * hx
             y = j * hy
 
-            dist = (x - cx) ** 2 + (y - cy) ** 2
+            square_dist = (x - cx) ** 2 + (y - cy) ** 2
 
-            if (dist <= r**2):
+            if (square_dist <= r_squared):
                 circulo.append((i + j * Nx, T))
 
     return circulo
 
 # --- PARÂMETROS BASE SUGERIDOS ---
 Lx, Ly = 0.02, 0.01  # 2 cm x 1 cm em metros
-k_nominal = 0.25
+k_nominal = 0.2
 fonte_calor_nominal = 5e5
 
-raio_regiao_circular = 0.002
+raio_circulo = 0.002
+x_circulo = 0.75 * Lx
+y_circulo = 0.5 * Ly
 
 def exercicio_1():
     print("\n--- EXERCÍCIO 1 ---")
@@ -417,7 +536,7 @@ def exercicio_1():
     print("-" * 65)
     
     for Nx, Ny in malhas:
-        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal)
+        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, fonte_calor=fonte_calor_nominal)
         temp_bordas = borda_padrao(Nx, Ny)
         
         # Teste com Matriz Esparsa
@@ -434,7 +553,7 @@ def exercicio_1():
         print(f"({Nx}, {Ny})".ljust(12) + f" | {t_max:.2f}   | {tempo_esparsa:.5f}".ljust(22) + f" | {tempo_densa}")
         
         # Plotar apenas para uma malha intermediária para não abrir 50 janelas
-        if Nx == 81:
+        if Nx == 321:
             placa.plota_placa(title=f"Ex 1: Contorno para malha {Nx}x{Ny}")
             
             # Plotar temperatura no eixo central
@@ -466,9 +585,9 @@ def exercicio_2():
 
         circulo = circulo_constante(
             T  = 30.0,
-            r  = raio_regiao_circular,
-            cx = 0.75 * placa.Lx,
-            cy = 0.5  * placa.Ly,
+            r  = raio_circulo,
+            cx = x_circulo,
+            cy = y_circulo,
             Nx = placa.Nx,
             Ny = placa.Ny,
             hx = placa.hx,
@@ -480,7 +599,7 @@ def exercicio_2():
         placa.resolver(fronteira_total)
         
         print(f"Malha {Nx}x{Ny} -> T_max = {placa.temp_max():.2f}")
-        if Nx == 81:
+        if Nx == 161:
             placa.plota_placa(title=f"Ex 2: Região Circular (Malha {Nx}x{Ny})")
             x_perfil, T_perfil = placa.get_central_profile()
             plt.figure()
@@ -499,7 +618,7 @@ def exercicio_3():
     Nx = 81
     Ny = 41
 
-    placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_variavel)
+    placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_variavel, fonte_calor=fonte_calor_nominal)
 
     temp_bordas = borda_padrao(Nx, Ny)
 
@@ -516,15 +635,15 @@ def exercicio_4():
     medias = []
     
     for Tc in temperaturas_Tc:
-        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal)
+        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, fonte_calor=fonte_calor_nominal)
 
         temp_bordas = borda_padrao(Nx, Ny)
 
         circulo = circulo_constante(
             T  = Tc,
-            r  = raio_regiao_circular,
-            cx = 0.75 * placa.Lx,
-            cy = 0.5  * placa.Ly,
+            r  = raio_circulo,
+            cx = x_circulo,
+            cy = y_circulo,
             Nx = placa.Nx,
             Ny = placa.Ny,
             hx = placa.hx,
@@ -536,7 +655,7 @@ def exercicio_4():
         placa.resolver(fronteira_total)
 
         maximas.append(placa.temp_max())
-        medias.append(placa.temp_max())
+        medias.append(placa.temp_med())
         
     plt.figure(figsize=(6,4))
     plt.plot(temperaturas_Tc, maximas, 'r-o', label='T_max')
@@ -564,14 +683,14 @@ def exercicio_5():
     T_obs = []
     
     for c in casos:
-        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal)
+        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, fonte_calor=fonte_calor_nominal)
 
         borda = borda_constante(Nx, Ny, c['TR'])
         circulo = circulo_constante(
             T  = c['TC'],
-            r  = raio_regiao_circular,
-            cx = 0.75 * placa.Lx,
-            cy = 0.5  * placa.Ly,
+            r  = raio_circulo,
+            cx = x_circulo,
+            cy = y_circulo,
             Nx = placa.Nx,
             Ny = placa.Ny,
             hx = placa.hx,
@@ -600,37 +719,28 @@ def exercicio_5():
     print(f"Equação: Tk = {a:.4f}*TR + {b:.4f}*TC + {c_coef:.4f}")
 
 if __name__ == "__main__":
-
-    # exercicio_1()
+    exercicio_1()
     # exercicio_2()
     # exercicio_3()
     # exercicio_4()
     # exercicio_5()
 
-    """
-    placa = PlacaTermica(Nx=41, Ny=21, k=0.25, h=0.1)
-    fronteira = borda_padrao(placa.Nx, placa.Ny)
+    # placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
+    # fronteira = borda_padrao(placa.Nx, placa.Ny)
 
-    T_estrela = 150.0
+    # T_estrela = 39.5
 
-    centro_x = (placa.Nx - 1) * placa.h / 2
-    centro_y = (placa.Ny - 1) * placa.h / 2
-    raio_circulo = 0.3
+    # Tc_ideal = placa.descobrir_Tc_para_Tmax(
+    #     T_alvo=T_estrela, 
+    #     fronteira=fronteira,
+    #     raio=raio_circulo, cx=x_circulo, cy=y_circulo
+    # )
 
-    Tc_ideal = placa.descobrir_Tc_para_Tmax(
-        T_alvo=T_estrela, 
-        fronteira=fronteira,
-        raio=raio_circulo, cx=centro_x, cy=centro_y
-    )
+    # placa.resolver(fronteira)
 
-    placa.resolver(fronteira)
-
-    historico_jac = placa.gerar_historico_jacobi(fronteira, max_iter=200)
-
-    historico_gs = placa.gerar_historico_gauss_seidel(fronteira, max_iter=200)
-
-    placa.animar_comparacao(historico_jac, historico_gs, intervalo_ms=40)
+    # historico_jac = placa.gerar_historico_jacobi(fronteira, max_iter=200)
+    # historico_gs = placa.gerar_historico_gauss_seidel(fronteira, max_iter=200)
+    # placa.animar_comparacao(historico_jac, historico_gs, intervalo_ms=40)
     
-    placa.plota_placa(flag_type='contour')
-    placa.plota_placa(flag_type='surface')
-    """
+    # placa.plota_placa(flag_type='contour')
+    # placa.plota_placa(flag_type='surface')
