@@ -50,14 +50,10 @@ class PlacaTermica:
         self.matriz_global[idx_k + k, idx_k] = d3
         self.matriz_global[idx_k, idx_k + k] = d3
         
-        for i in range(self.Nx):
-            for j in range(self.Ny):
+        for i in range(1, self.Nx - 1, 1):
+            for j in range(1, self.Ny - 1, 1):
                 ic = self.flatten_coordinate(i, j)
-                
-                if 0 < i < self.Nx - 1 and 0 < j < self.Ny - 1:
-                    self.vetor_fonte[ic] = (self.h ** 2) * self.fonte_calor
-                else:
-                    self.vetor_fonte[ic] = 0.0
+                self.vetor_fonte[ic] = (self.h ** 2) * self.fonte_calor
 
     def assembly_variavel(self):
         """Monta a matriz global sistema e o vetor, quando k é função de i e j."""
@@ -240,7 +236,7 @@ class PlacaTermica:
             
         plt.show()
     
-    def resolver_com_circulo(self, T_c: float, fronteira:list, raio: float, cx: float, cy: float):
+    def resolver_com_circulo(self, T_c: float, fronteira:list[(int, float)], raio: float, cx: float, cy: float):
         """
         Monta e resolve a placa aplicando uma temperatura T_c fixa 
         em uma região circular definida por um raio e centro (cx, cy).
@@ -265,7 +261,7 @@ class PlacaTermica:
         return temp_1d.reshape((self.Ny, self.Nx)), T_max_atual
 
 
-    def descobrir_Tc_para_Tmax(self, T_alvo: float, fronteira:list, raio: float, cx: float, cy: float, tolerancia: float = 1e-4, max_iter: int = 50):
+    def descobrir_Tc_para_Tmax(self, T_alvo: float, fronteira:list[(int, float)], raio: float, cx: float, cy: float, tolerancia: float = 1e-4, max_iter: int = 50):
         """
         Usa o Método da Secante (um método iterativo simples) para encontrar 
         qual T_c faz com que T_max da placa seja exatamente T_alvo.
