@@ -107,24 +107,21 @@ class PlacaTermica:
                     
                 self.b[ic] = (self.ds) * self.fonte_calor
 
-        """
         # Impõe por padrão uma temperatura 0 nas bordas
 
-        for i in range(self.Nx):
-            i_top = self.flatten_coordinate(i, 0)
-            i_bottom = self.flatten_coordinate(i, self.Ny - 1)
+        # # for i in range(self.Nx):
+        #     # i_top = self.flatten_coordinate(i, 0)
+        #     i_bottom = self.flatten_coordinate(i, self.Ny - 1)
 
-            self.A[i_top, i_top] = 1.0
-            self.A[i_bottom, i_bottom] = 1.0
+        #     self.A[i_top, i_top] = 1.0
+        #     self.A[i_bottom, i_bottom] = 1.0
 
-        for j in range(self.Ny):
-            i_left = self.flatten_coordinate(0, j)
-            i_right = self.flatten_coordinate(self.Nx - 1, j)
+        # for j in range(self.Ny):
+        #     i_left = self.flatten_coordinate(0, j)
+        #     i_right = self.flatten_coordinate(self.Nx - 1, j)
 
-            self.A[i_left, i_left] = 1.0
-            self.A[i_right, i_right] = 1.0
-
-        """
+        #     self.A[i_left, i_left] = 1.0
+        #     self.A[i_right, i_right] = 1.0
 
     def resolver_densa(self, fronteira:list[(int, float)]):
         self.montar_densa(fronteira)
@@ -216,17 +213,14 @@ class PlacaTermica:
     def resolver_esparsa(self, fronteira:list[(int, float)]):
         self.montar_esparsa(fronteira)
 
-        """
-        tempo_inicio = time.time()
+        # tempo_inicio = time.time()
 
-        self.montar_densa(fronteira)
-        self.A = sparse.csr_matrix(self.A)
+        # self.montar_densa(fronteira)
+        # self.A = sparse.csr_matrix(self.A)
 
-        tempo_fim = time.time()
+        # tempo_fim = time.time()
 
-        self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
-
-        """
+        # self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
 
         tempo_inicio = time.time()
 
@@ -298,7 +292,7 @@ class PlacaTermica:
             malha[i, j]  = T
 
         return malha
-
+    
     def gerar_historico_jacobi(self, fronteira:list[(int, float)], max_iter: int = 150):
         """Resolve a placa via Jacobi e retorna uma lista com o estado da malha a cada iteração."""
         # Inicializa a malha com zeros
@@ -372,7 +366,7 @@ class PlacaTermica:
         frames_totais = min(len(hist_jacobi), len(hist_gs))
         ani = animation.FuncAnimation(fig, update, frames=frames_totais, interval=intervalo_ms, repeat=False)
         
-        contorno_base = ax1.contourf(X, Y, hist_jacobi[0].T, 20, cmap='jet', vmin=vmin, vmax=vmax)
+        contorno_base = ax1.contourf(X, Y, hist_jacobi[0].T, 20, cmap='jet')
         fig.colorbar(contorno_base, ax=[ax1, ax2], orientation='horizontal', shrink=0.6, pad=0.15)
         
         if filename:
@@ -387,7 +381,7 @@ class PlacaTermica:
         em uma região circular definida por um raio e centro (cx, cy).
         Retorna a matriz de temperaturas e o valor máximo encontrado.
         """
-        # Pega a matriz normal com as bordas
+        
         circulo = circulo_constante(
             T  = T_c,
             r  = raio,
@@ -564,7 +558,7 @@ def exercicio_1():
             plt.legend()
             plt.show()
 
-def exercicio_2():
+def exercicio_2(T_c:float=30.0):
     print("\n--- EXERCÍCIO 2 (Parâmetros do enunciado) ---")
     malhas = [(41, 21), (81, 41), (161, 81)]
 
@@ -581,7 +575,7 @@ def exercicio_2():
         temp_bordas = borda_padrao(Nx, Ny)
 
         circulo = circulo_constante(
-            T  = 30.0,
+            T  = T_c,
             r  = raio_circulo,
             cx = x_circulo,
             cy = y_circulo,
@@ -715,29 +709,37 @@ def exercicio_5():
     print(f"Coeficientes calculados: a = {a:.4f}, b = {b:.4f}, c = {c_coef:.4f}")
     print(f"Equação: Tk = {a:.4f}*TR + {b:.4f}*TC + {c_coef:.4f}")
 
+def exercicio_2_extra(T_estrela:float=39.5):
+    placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
+    fronteira = borda_padrao(placa.Nx, placa.Ny)
+
+    Tc_ideal = placa.descobrir_Tc_para_Tmax(
+        T_alvo=T_estrela, 
+        fronteira=fronteira,
+        raio=raio_circulo, cx=x_circulo, cy=y_circulo
+    )
+
+    return Tc_ideal
+
+def exercicio_3_extra():
+    placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
+    fronteira = borda_padrao(placa.Nx, placa.Ny)
+
+    historico_jac = placa.gerar_historico_jacobi(fronteira, max_iter=200)
+    historico_gs = placa.gerar_historico_gauss_seidel(fronteira, max_iter=200)
+    placa.animar_comparacao(historico_jac, historico_gs, intervalo_ms=40)
+    
+    placa.resolver(fronteira)
+
+    placa.plota_placa(flag_type='contour')
+    placa.plota_placa(flag_type='surface')
+
 if __name__ == "__main__":
-    exercicio_1()
-    # exercicio_2()
+    # exercicio_1()
+    # exercicio_2(T_c=30.0)
     # exercicio_3()
     # exercicio_4()
     # exercicio_5()
 
-    # placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
-    # fronteira = borda_padrao(placa.Nx, placa.Ny)
-
-    # T_estrela = 39.5
-
-    # Tc_ideal = placa.descobrir_Tc_para_Tmax(
-        # T_alvo=T_estrela, 
-        # fronteira=fronteira,
-        # raio=raio_circulo, cx=x_circulo, cy=y_circulo
-    # )
-
-    # placa.resolver(fronteira)
-
-    # historico_jac = placa.gerar_historico_jacobi(fronteira, max_iter=200)
-    # historico_gs = placa.gerar_historico_gauss_seidel(fronteira, max_iter=200)
-    # placa.animar_comparacao(historico_jac, historico_gs, intervalo_ms=40)
-    
-    # placa.plota_placa(flag_type='contour')
-    # placa.plota_placa(flag_type='surface')
+    # exercicio_2_extra(T_estrela=39.5)
+    exercicio_3_extra()
