@@ -293,16 +293,16 @@ class PlacaTermica:
 
         return malha
     
-    def gerar_historico_jacobi(self, fronteira:list[(int, float)], max_iter: int = 150):
+    def gerar_historico_jacobi(self, fronteira:list[(int, float)], max_iter:int=1000, frame_skip:int=10):
         """Resolve a placa via Jacobi e retorna uma lista com o estado da malha a cada iteração."""
         # Inicializa a malha com zeros
         T = self.malha_iterativa(fronteira=fronteira)
         
         # Dedução do termo fonte baseado na sua montagem: 4Tc - Te - Tw - Tn - Ts = (h^2 * f) / k
         termo_fonte = (self.ds * self.fonte_calor) / self.k
-        historico = [T.copy()]
+        historico = [(0, T.copy())]
 
-        for _ in range(max_iter):
+        for n in range(1, max_iter + 1):
             T_new = T.copy()
             # Versão vetorizada e rápida do Jacobi (calcula tudo ao mesmo tempo usando o estado antigo)
             T_new[1:-1, 1:-1] = 0.25 * (
@@ -311,18 +311,20 @@ class PlacaTermica:
                 termo_fonte
             )
             T = T_new
-            historico.append(T.copy())
+
+            if (n % frame_skip == 0):
+                historico.append((n, T.copy()))
             
         return historico
 
-    def gerar_historico_gauss_seidel(self, fronteira:list[(int, float)], max_iter: int = 150):
+    def gerar_historico_gauss_seidel(self, fronteira:list[(int, float)], max_iter:int=1000, frame_skip:int=10):
         """Resolve a placa via Gauss-Seidel e retorna uma lista com o estado da malha a cada iteração."""
         T = self.malha_iterativa(fronteira=fronteira)
         
         termo_fonte = (self.ds * self.fonte_calor) / self.k
-        historico = [T.copy()]
+        historico = [(0, T.copy())]
 
-        for _ in range(max_iter):
+        for n in range(1, max_iter + 1):
             for i in range(1, self.Nx - 1):
                 for j in range(1, self.Ny - 1):
                     T[i, j] = 0.25 * (
@@ -330,7 +332,9 @@ class PlacaTermica:
                         T[i, j+1] + T[i, j-1] + 
                         termo_fonte
                     )
-            historico.append(T.copy())
+
+            if (n % frame_skip == 0):
+                historico.append((n, T.copy()))
             
         return historico
 
@@ -342,18 +346,24 @@ class PlacaTermica:
         Ly = self.Ly
         X, Y = np.meshgrid(np.linspace(0.0, Lx, self.Nx), np.linspace(0.0, Ly, self.Ny))
         
-        vmin = min(np.min(hist_jacobi), np.min(hist_gs))
-        vmax = max(np.max(hist_jacobi), np.max(hist_gs))
+        h_jc = list(map(lambda x: x[1], hist_jacobi))
+        h_gs = list(map(lambda x: x[1], hist_gs))
+
+        vmin = min(np.min(h_jc), np.min(h_gs))
+        vmax = max(np.max(h_jc), np.max(h_gs))
         
         def update(frame):
             ax1.clear()
             ax2.clear()
+
+            jacobi = hist_jacobi[frame]
+            gs     = hist_gs[frame]
             
-            contorno1 = ax1.contourf(X, Y, hist_jacobi[frame].T, 20, cmap='jet', vmin=vmin, vmax=vmax)
-            contorno2 = ax2.contourf(X, Y, hist_gs[frame].T, 20, cmap='jet', vmin=vmin, vmax=vmax)
+            contorno1 = ax1.contourf(X, Y, jacobi[1].T, 20, cmap='jet', vmin=vmin, vmax=vmax)
+            contorno2 = ax2.contourf(X, Y, gs[1].T, 20, cmap='jet', vmin=vmin, vmax=vmax)
             
-            ax1.set_title(f"Jacobi (Iteração {frame})")
-            ax2.set_title(f"Gauss-Seidel (Iteração {frame})")
+            ax1.set_title(f"Jacobi (Iteração {jacobi[0]})")
+            ax2.set_title(f"Gauss-Seidel (Iteração {gs[0]})")
             
             for ax in [ax1, ax2]:
                 ax.set_aspect('equal')
@@ -366,7 +376,7 @@ class PlacaTermica:
         frames_totais = min(len(hist_jacobi), len(hist_gs))
         ani = animation.FuncAnimation(fig, update, frames=frames_totais, interval=intervalo_ms, repeat=False)
         
-        contorno_base = ax1.contourf(X, Y, hist_jacobi[-1].T, 20, cmap='jet')
+        contorno_base = ax1.contourf(X, Y, h_jc[-1].T, 20, cmap='jet')
         fig.colorbar(contorno_base, ax=[ax1, ax2], orientation='horizontal', shrink=0.6, pad=0.15)
         
         if filename:
@@ -723,8 +733,8 @@ def exercicio_3_extra():
     placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
     fronteira = borda_padrao(placa.Nx, placa.Ny)
 
-    historico_jac = placa.gerar_historico_jacobi(fronteira, max_iter=200)
-    historico_gs = placa.gerar_historico_gauss_seidel(fronteira, max_iter=200)
+    historico_jac = placa.gerar_historico_jacobi(fronteira)
+    historico_gs = placa.gerar_historico_gauss_seidel(fronteira)
     placa.animar_comparacao(historico_jac, historico_gs, intervalo_ms=40)
     
     placa.resolver(fronteira)
@@ -733,11 +743,11 @@ def exercicio_3_extra():
     placa.plota_placa(flag_type='surface')
 
 if __name__ == "__main__":
-    exercicio_1()
+    # exercicio_1()
     # exercicio_2(T_c=30.0)
     # exercicio_3()
     # exercicio_4()
     # exercicio_5()
 
     # exercicio_2_extra(T_estrela=39.5)
-    # exercicio_3_extra()
+    exercicio_3_extra()
