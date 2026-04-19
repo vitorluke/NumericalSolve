@@ -527,7 +527,7 @@ y_circulo = 0.5 * Ly
 
 def exercicio_1():
     print("\n--- EXERCÍCIO 1 ---")
-    malhas = [(21, 11), (41, 21), (81, 41), (161, 81), (321, 161)]
+    malhas = [(21, 11), (41, 21), (81, 41), (161, 81), (321, 161), (641, 321)]
     
     print(f"{'Malha':<12} | {'T_max':<7} | {'Tempo Esparsa (s)':<18} | {'Tempo Densa (s)':<15}")
     print("-" * 65)
@@ -537,20 +537,20 @@ def exercicio_1():
         temp_bordas = borda_padrao(Nx, Ny)
         
         # Teste com Matriz Esparsa
-        placa.resolver(temp_bordas)
+        placa.resolver(temp_bordas, use_sparse=True)
         tempo_esparsa = placa.tempos_execucao['total']
         t_max = placa.temp_max()
         
         # Teste com Matriz Densa (CUIDADO com falta de memória para malhas grandes)
         tempo_densa = "N/A (Memória)"
-        if Nx * Ny <= 20000: # Proteção contra MemoryError
-            placa.resolver(temp_bordas)
+        if Nx * Ny < 50000: # Proteção contra MemoryError
+            placa.resolver(temp_bordas, use_sparse=False)
             tempo_densa = f"{placa.tempos_execucao['total']:.5f}"
         
         print(f"({Nx}, {Ny})".ljust(12) + f" | {t_max:.2f}   | {tempo_esparsa:.5f}".ljust(31) + f" | {tempo_densa}")
         
         # Plotar apenas para uma malha intermediária para não abrir 50 janelas
-        if Nx == 321:
+        if Nx == 641:
             placa.plota_placa(title=f"Ex 1: Contorno para malha {Nx}x{Ny}")
             
             # Plotar temperatura no eixo central
