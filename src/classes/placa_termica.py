@@ -491,8 +491,8 @@ class PlacaTermica:
                 termo_fonte
             )
 
-            if np.linalg.norm(T - T_new, np.inf) < epsilon:
-                self.temperaturas = T_new.T.reshape((self.N_total, 1))
+            if np.linalg.norm(T_new - T, np.inf) < epsilon:
+                self.temperaturas = T_new.T.reshape(self.N_total)
                 
                 tempo_fim = time.time()
                 self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
@@ -502,7 +502,7 @@ class PlacaTermica:
 
             T = T_new
 
-        self.temperaturas = T.T.reshape((self.N_total, 1))
+        self.temperaturas = T.T.reshape(self.N_total)
 
         tempo_fim = time.time()
         self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
@@ -532,7 +532,7 @@ class PlacaTermica:
                     )
 
             if np.linalg.norm(T - T_old, np.inf) < epsilon:
-                self.temperaturas = T.T.reshape((self.N_total, 1))
+                self.temperaturas = T.T.reshape(self.N_total)
 
                 tempo_fim = time.time()
                 self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
@@ -540,7 +540,7 @@ class PlacaTermica:
 
                 return self.temperaturas
 
-        self.temperaturas = T.T.reshape((self.N_total, 1))
+        self.temperaturas = T.T.reshape(self.N_total)
         
         tempo_fim = time.time()
         self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
@@ -820,11 +820,12 @@ def exercicio_3_extra():
 
 def exercicio_1_extra():
     print("\n--- EXERCÍCIO 1 EXTRA ---")
-    ex_1_extra_tolerancia()
+    # ex_1_extra_tolerancia()
     ex_1_extra_malha()
 
 def ex_1_extra_tolerancia():
-    Nx, Ny = 81, 41
+    print("\n--- GRÁFICO TEMPO X TOLERÂNCIA ---")
+    Nx, Ny = 101, 51
 
     placa = PlacaTermica(
         Lx=Lx,
@@ -837,21 +838,28 @@ def ex_1_extra_tolerancia():
 
     borda = borda_padrao(Nx, Ny)
 
-    tolerancia = list(map(lambda n:10**(-n), range(2,12)))
+    tolerancia = list(map(lambda n:10**(-n), range(2,15)))
 
     tempo_jacobi = []
     tempo_gauss_seidel = []
 
-    for epsilon in tolerancia:
-        placa.resolver_jacobi(borda, epsilon, max_iter=100000)
-        tempo_jacobi.append(placa.tempos_execucao['total'])
+    print("\nTolerância | Jacobi (s)   | Gauss-Seidel (s)")
 
-        placa.resolver_gauss_seidel(borda, epsilon, max_iter=100000)
-        tempo_gauss_seidel.append(placa.tempos_execucao['total'])
+    for epsilon in tolerancia:
+        placa.resolver_jacobi(borda, epsilon, max_iter=1000000)
+        t1 = placa.tempos_execucao['total']
+
+        placa.resolver_gauss_seidel(borda, epsilon, max_iter=1000000)
+        t2 = placa.tempos_execucao['total']
+
+        tempo_jacobi.append(t1)
+        tempo_gauss_seidel.append(t2)
+
+        print(f"{epsilon:.2e}".ljust(10), f"| {t1:.6e} | {t2:.6e}")
 
     plt.figure(figsize=(6,4))
-    plt.plot(tolerancia, tempo_jacobi, label='Jacobi')
-    plt.plot(tolerancia, tempo_gauss_seidel, label='Gauss-Seidel')
+    plt.plot(tolerancia, tempo_jacobi, 'r-o', label='Jacobi')
+    plt.plot(tolerancia, tempo_gauss_seidel, 'b-o', label='Gauss-Seidel')
 
     plt.xlabel('Tolerância (°C)')
     plt.ylabel('Tempo (s)')
@@ -867,15 +875,19 @@ def ex_1_extra_tolerancia():
     plt.show()
 
 def ex_1_extra_malha():
-    subdivisoes = list(map(lambda n: (n*10+1,n*5+1), range(2, 9)))
-    epsilon = 1e-5
+    print("\n--- GRÁFICO TEMPO X SUBDIVISÕES ---")
+    
+    subdivisoes = list(map(lambda n: (n*10+1,n*5+1), range(2, 13)))
+    epsilon = 1e-6
 
     num_celulas = []
     tempo_jacobi = []
     tempo_gauss_seidel = []
 
+    print("\nSubdivisões | Jacobi (s)   | Gauss-Seidel (s)")
+
     for (Nx, Ny) in subdivisoes:
-        num_celulas.append(Nx * Ny)
+        N_total = Nx * Ny
 
         placa = PlacaTermica(
             Lx=Lx,
@@ -889,14 +901,20 @@ def ex_1_extra_malha():
         borda = borda_padrao(Nx, Ny)
 
         placa.resolver_jacobi(borda, epsilon, max_iter=100000000)
-        tempo_jacobi.append(placa.tempos_execucao['total'])
+        t1 = placa.tempos_execucao['total']
 
         placa.resolver_gauss_seidel(borda, epsilon, max_iter=100000000)
-        tempo_gauss_seidel.append(placa.tempos_execucao['total'])
+        t2 = placa.tempos_execucao['total']
+
+        num_celulas.append(N_total)
+        tempo_jacobi.append(t1)
+        tempo_gauss_seidel.append(t2)
+
+        print(f"{N_total}".ljust(11), f"| {t1:.6e} | {t2:.6e}")
 
     plt.figure(figsize=(6,4))
-    plt.plot(num_celulas, tempo_jacobi, label='Jacobi')
-    plt.plot(num_celulas, tempo_gauss_seidel, label='Gauss-Seidel')
+    plt.plot(num_celulas, tempo_jacobi, 'r-o', label='Jacobi')
+    plt.plot(num_celulas, tempo_gauss_seidel, 'b-o', label='Gauss-Seidel')
 
     plt.xlabel('Número de subdivisões')
     plt.ylabel('Tempo (s)')
@@ -917,6 +935,6 @@ if __name__ == "__main__":
     # exercicio_4()
     # exercicio_5()
 
-    # exercicio_1_extra()
+    exercicio_1_extra()
     # exercicio_2_extra(T_estrela=30.0)
-    exercicio_3_extra()
+    # exercicio_3_extra()
