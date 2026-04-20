@@ -791,8 +791,8 @@ def exercicio_5():
     print(f"Coeficientes calculados: a = {a:.4f}, b = {b:.4f}, c = {c_coef:.4f}")
     print(f"Equação: Tk = {a:.4f}*TR + {b:.4f}*TC + {c_coef:.4f}")
 
-def exercicio_2_extra(T_estrela:float=39.5):
-    print("\n--- EXERCÍCIO 2 EXTRA ---")
+def exercicio_3_extra(T_estrela:float=39.5):
+    print("\n--- EXERCÍCIO 3 EXTRA ---")
     placa = PlacaTermica(Nx=161, Ny=81, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
     fronteira = borda_padrao(placa.Nx, placa.Ny)
 
@@ -804,8 +804,8 @@ def exercicio_2_extra(T_estrela:float=39.5):
 
     return Tc_ideal
 
-def exercicio_3_extra():
-    print("\n--- EXERCÍCIO 3 EXTRA ---")
+def exercicio_2_extra():
+    print("\n--- EXERCÍCIO 2 EXTRA ---")
     placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
     fronteira = borda_padrao(placa.Nx, placa.Ny)
 
