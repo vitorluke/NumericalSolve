@@ -2,6 +2,8 @@ from src.classes.rede_hidraulica import RedeHidraulica
 from src.graphs_utils.utils import gerar_grafo_aleatorio, plotar_grafo_alternativo
 from src.graphs_utils.utils import gera_rede
 from src.graph_benchmarking.benchmark import *
+import src.classes.placa_termica as pt
+from collections.abc import Mapping
 
 
 def main():
@@ -34,7 +36,9 @@ from src.graphs_utils.utils import gera_rede
 from src.graph_benchmarking.benchmark import *
 
 
-def main():
+
+
+def rede_hidraulica():
     str_input = ""
     pressoes_impostas = {5: 0.0, 10: 0.0, 15: 0.0, 20: 0.0}
     vazoes_impostas = {2: 0.25, 7: 0.25, 12: 0.25, 17: 0.25}
@@ -110,6 +114,43 @@ def main():
     rede = gera_rede(1)
     rede.assembly()
     pressao = rede.resolver(pressao_imposta={6: 0.0}, vazao_imposta={1: 0.1})
+
+
+
+def print_options(function_map:Mapping[str,function]):
+    map = {}
+    print("Menu:")
+    print("-"*20)
+    for index,value in enumerate(function_map.keys()):
+        map[index] = function_map[value]
+        print(f"{index:02} - {value}")
+    print("-"*20)
+    return map
+
+def function_menu(map:Mapping[str,function]):
+    index_mapping = print_options(map)
+    choice = int(input("Digite o número da opção: "))
+    if index_mapping.__contains__(choice):
+        return index_mapping[choice]()
+    else:
+        print("Opção inválida!")
+        function_menu(map)
+
+
+
+
+def main():
+    function_menu({
+        "Exercício 1": pt.exercicio_1,
+        "Exercício 2": pt.exercicio_2,
+        "Exercício 3": pt.exercicio_3,
+        "Exercício 4": pt.exercicio_4,
+        "Exercício 5": pt.exercicio_5,
+        "Exercício 1 Extra": pt.exercicio_1_extra,
+        "Exercício 2 Extra": pt.exercicio_2_extra,
+        "Exercício 3 Extra": pt.exercicio_3_extra,
+    })
+
     
 
 if __name__ == "__main__":

@@ -929,12 +929,12 @@ def ex_1_extra_malha():
 
 
 if __name__ == "__main__":
-    # exercicio_1()
-    # exercicio_2(T_c=30.0)
-    # exercicio_3()
-    # exercicio_4()
-    # exercicio_5()
+    exercicio_1()
+    exercicio_2(T_c=30.0)
+    exercicio_3()
+    exercicio_4()
+    exercicio_5()
 
-    exercicio_1_extra()
-    # exercicio_2_extra(T_estrela=30.0)
-    # exercicio_3_extra()
+    # exercicio_1_extra()
+    #exercicio_2_extra(T_estrela=30.0)
+    #exercicio_3_extra()
