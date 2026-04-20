@@ -2,6 +2,7 @@ from scipy import sparse
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import matplotlib.colors as mcolors
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 import time
@@ -376,7 +377,7 @@ class PlacaTermica:
         frames_totais = min(len(hist_jacobi), len(hist_gs))
         ani = animation.FuncAnimation(fig, update, frames=frames_totais, interval=intervalo_ms, repeat=False)
         
-        contorno_base = ax1.contourf(X, Y, h_jc[-1].T, 20, cmap='jet')
+        contorno_base = ax1.contourf(X, Y, h_jc[-1].T, 20, cmap='jet', vmin=vmin, vmax=vmax)
         fig.colorbar(contorno_base, ax=[ax1, ax2], orientation='horizontal', shrink=0.6, pad=0.15)
         
         if filename:
@@ -916,6 +917,6 @@ if __name__ == "__main__":
     # exercicio_4()
     # exercicio_5()
 
-    exercicio_1_extra()
+    # exercicio_1_extra()
     # exercicio_2_extra(T_estrela=30.0)
-    # exercicio_3_extra()
+    exercicio_3_extra()
