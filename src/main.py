@@ -123,13 +123,13 @@ def print_options(function_map:Mapping[str,function]):
     print("-"*20)
     for index,value in enumerate(function_map.keys()):
         map[index] = function_map[value]
-        print(f"{index:02} - {value}")
+        print(f"{index+1:02} - {value}")
     print("-"*20)
     return map
 
 def function_menu(map:Mapping[str,function]):
     index_mapping = print_options(map)
-    choice = int(input("Digite o número da opção: "))
+    choice = int(input("Digite o número da opção: ")) - 1
     if index_mapping.__contains__(choice):
         return index_mapping[choice]()
     else:

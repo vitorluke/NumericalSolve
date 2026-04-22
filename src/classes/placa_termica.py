@@ -1122,7 +1122,7 @@ def ex_1_extra_tolerancia():
 def ex_1_extra_malha():
     print("\n--- GRÁFICO TEMPO X SUBDIVISÕES ---")
     
-    subdivisoes = list(map(lambda n: (n*10+1,n*5+1), range(2, 33)))
+    subdivisoes = list(map(lambda n: (n*10+1,n*5+1), range(2, 15)))
     tol = 1e-12
 
     num_celulas = []

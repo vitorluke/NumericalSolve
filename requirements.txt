@@ -4,3 +4,4 @@ pyvis
 scipy
 pandas
 shapely
+numba
