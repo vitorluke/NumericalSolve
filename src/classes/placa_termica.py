@@ -6,6 +6,7 @@ import matplotlib.colors as mcolors
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 import time
+from numba import njit
 
 class PlacaTermica:
     def __init__(self, Lx:float, Ly:float, Nx: int, Ny: int, k, fonte_calor: float = 0.0):
@@ -24,11 +25,11 @@ class PlacaTermica:
 
         self.k = k
 
-        self.fonte_calor = fonte_calor # Termo f(x,y)
+        self.fonte_calor = fonte_calor
 
         self.A = None
         self.b = None        
-        self.temperaturas = None
+        self.T = None
 
         self.tempos_execucao = {}
 
@@ -46,11 +47,11 @@ class PlacaTermica:
         else:
             self._montar_densa_uniforme()
 
-        for (ic, T) in fronteira:
+        for (ic, t) in fronteira:
             self.A[ic, :]  = 0.0
             self.A[ic, ic] = 1.0
 
-            self.b[ic] = T
+            self.b[ic] = t
 
         tempo_fim = time.time()
 
@@ -108,35 +109,19 @@ class PlacaTermica:
                     
                 self.b[ic] = (self.ds) * self.fonte_calor
 
-        # Impõe por padrão uma temperatura 0 nas bordas
-
-        # # for i in range(self.Nx):
-        #     # i_top = self.flatten_coordinate(i, 0)
-        #     i_bottom = self.flatten_coordinate(i, self.Ny - 1)
-
-        #     self.A[i_top, i_top] = 1.0
-        #     self.A[i_bottom, i_bottom] = 1.0
-
-        # for j in range(self.Ny):
-        #     i_left = self.flatten_coordinate(0, j)
-        #     i_right = self.flatten_coordinate(self.Nx - 1, j)
-
-        #     self.A[i_left, i_left] = 1.0
-        #     self.A[i_right, i_right] = 1.0
-
     def _resolver_densa(self, fronteira:list[(int, float)]):
         self._montar_densa(fronteira)
 
         tempo_inicio = time.time()
 
-        self.temperaturas = np.linalg.solve(self.A, self.b)
+        self.T = np.linalg.solve(self.A, self.b)
 
         tempo_fim = time.time()
 
         self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
         self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
 
-        return self.temperaturas
+        return self.T
     
     def _montar_esparsa(self, fronteira:list[(int, float)]):
         tempo_inicio = time.time()
@@ -147,12 +132,12 @@ class PlacaTermica:
 
         self.b = np.zeros(self.N_total)
 
-        for (ic, T) in fronteira:
+        for (ic, t) in fronteira:
             rows.append(ic)
             cols.append(ic)
             data.append(1.0)
 
-            self.b[ic] = T
+            self.b[ic] = t
 
         if (callable(self.k)):
             for i in range(1, self.Nx - 1):
@@ -209,30 +194,21 @@ class PlacaTermica:
 
         self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
 
-        return self.temperaturas
+        return self.T
 
     def _resolver_esparsa(self, fronteira:list[(int, float)]):
         self._montar_esparsa(fronteira)
 
-        # tempo_inicio = time.time()
-
-        # self.montar_densa(fronteira)
-        # self.A = sparse.csr_matrix(self.A)
-
-        # tempo_fim = time.time()
-
-        # self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
-
         tempo_inicio = time.time()
 
-        self.temperaturas = sparse.linalg.spsolve(self.A, self.b)
+        self.T = sparse.linalg.spsolve(self.A, self.b)
 
         tempo_fim = time.time()
 
         self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
         self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
 
-        return self.temperaturas
+        return self.T
     
     def resolver(self, fronteira:list[(int, float)], use_sparse:bool=True):
         if use_sparse:
@@ -241,27 +217,27 @@ class PlacaTermica:
             return self._resolver_densa(fronteira)
 
     def temp_max(self):
-        if self.temperaturas is None:
+        if self.T is None:
             return None
         else:
-            return np.max(self.temperaturas)
+            return np.max(self.T)
 
     def temp_med(self):
-        if self.temperaturas is None:
+        if self.T is None:
             return None
         else:
-            return np.average(self.temperaturas)
+            return np.average(self.T)
 
     def plota_placa(self, flag_type='contour', title='Distribuição de temperatura', filename=None):
         """Plota a dispersão de calor da placa (contour 2D ou surface 3D)."""
-        if self.temperaturas is None:
+        if self.T is None:
             print("Erro: Resolva a placa antes de plotar.")
             return
 
         x = np.linspace(0.0, self.Lx, self.Nx)
         y = np.linspace(0.0, self.Ly, self.Ny)
         X, Y = np.meshgrid(x, y)
-        Z = np.copy(self.temperaturas).reshape(self.Ny, self.Nx)
+        Z = np.copy(self.T).reshape(self.Ny, self.Nx)
         
         if flag_type == 'contour':
             fig, ax = plt.subplots(figsize=(8,4))
@@ -284,59 +260,123 @@ class PlacaTermica:
         plt.show()
 
     def _malha_iterativa(self, fronteira):
-        malha = np.zeros((self.Nx, self.Ny))
+        tempo_inicio = time.time()
 
-        for (ic, T) in fronteira:
+        T = np.zeros((self.Nx, self.Ny))
+
+        for (ic, t) in fronteira:
             i = ic %  self.Nx
             j = ic // self.Nx
 
-            malha[i, j]  = T
+            T[i, j] = t
 
-        return malha
-    
+        tempo_fim = time.time()
+        self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
+
+        return T
+
+    def _chute_inicial(self, borda):
+        T = np.zeros(self.N_total)
+
+        for (ic, t) in borda:
+            T[ic] = t
+
+        return T
+
     def gerar_historico_jacobi(self, fronteira:list[(int, float)], max_iter:int=1000, frame_skip:int=10):
         """Resolve a placa via Jacobi e retorna uma lista com o estado da malha a cada iteração."""
         # Inicializa a malha com zeros
         T = self._malha_iterativa(fronteira=fronteira)
         
         # Dedução do termo fonte baseado na sua montagem: 4Tc - Te - Tw - Tn - Ts = (h^2 * f) / k
-        termo_fonte = (self.ds * self.fonte_calor) / self.k
+        ke, kw, kn, ks, den = self._obter_vizinhos()
+
+        termo_fonte = self.ds * self.fonte_calor
         historico = [(0, T.copy())]
 
         for n in range(1, max_iter + 1):
             T_new = T.copy()
-            # Versão vetorizada e rápida do Jacobi (calcula tudo ao mesmo tempo usando o estado antigo)
-            T_new[1:-1, 1:-1] = 0.25 * (
-                T[2:, 1:-1] + T[:-2, 1:-1] + # Leste e Oeste
-                T[1:-1, 2:] + T[1:-1, :-2] + # Norte e Sul
+
+            T_new[1:-1, 1:-1] = (
+                ke*T[2:, 1:-1] + kw*T[:-2, 1:-1] +
+                kn*T[1:-1, 2:] + ks*T[1:-1, :-2] +
                 termo_fonte
-            )
-            T = T_new
+            ) / den
+
+            T[:] = T_new
 
             if (n % frame_skip == 0):
                 historico.append((n, T.copy()))
             
         return historico
 
-    def gerar_historico_gauss_seidel(self, fronteira:list[(int, float)], max_iter:int=1000, frame_skip:int=10):
+    def gerar_historico_gauss_seidel(self, borda:list[(int, float)], max_iter:int=1000, omega=1.85, frame_skip:int=10):
         """Resolve a placa via Gauss-Seidel e retorna uma lista com o estado da malha a cada iteração."""
-        T = self._malha_iterativa(fronteira=fronteira)
+        T = self._malha_iterativa(borda)
         
-        termo_fonte = (self.ds * self.fonte_calor) / self.k
+        ke, kw, kn, ks, den = self._obter_vizinhos()
+        termo_fonte = self.ds * self.fonte_calor
+
         historico = [(0, T.copy())]
 
         for n in range(1, max_iter + 1):
-            for i in range(1, self.Nx - 1):
-                for j in range(1, self.Ny - 1):
-                    T[i, j] = 0.25 * (
-                        T[i+1, j] + T[i-1, j] + 
-                        T[i, j+1] + T[i, j-1] + 
-                        termo_fonte
-                    )
+            max_diff = 0.0
+
+            Tgs = (
+                ke[::2, ::2]*T[2::2,1:-1:2] +
+                kw[::2, ::2]*T[:-2:2,1:-1:2] +
+                kn[::2, ::2]*T[1:-1:2,2::2] +
+                ks[::2, ::2]*T[1:-1:2,:-2:2] +
+                termo_fonte
+            ) / den[::2, ::2]
+
+            old = T[1:-1:2, 1:-1:2]
+            new = (1 - omega)*old + omega*Tgs
+            max_diff = max(max_diff, np.max(np.abs(new - old)))
+            T[1:-1:2, 1:-1:2] = new
+
+            Tgs = (
+                ke[1::2,1::2]*T[3::2,2:-1:2] +
+                kw[1::2,1::2]*T[1:-2:2,2:-1:2] +
+                kn[1::2,1::2]*T[2:-1:2,3::2] +
+                ks[1::2,1::2]*T[2:-1:2,1:-2:2] +
+                termo_fonte
+            ) / den[1::2,1::2]
+
+            old = T[2:-1:2, 2:-1:2]
+            new = (1 - omega)*old + omega*Tgs
+            max_diff = max(max_diff, np.max(np.abs(new - old)))
+            T[2:-1:2, 2:-1:2] = new
+
+            Tgs = (
+                ke[::2,1::2]*T[2::2,2:-1:2] +
+                kw[::2,1::2]*T[:-2:2,2:-1:2] +
+                kn[::2,1::2]*T[1:-1:2,3::2] +
+                ks[::2,1::2]*T[1:-1:2,1:-2:2] +
+                termo_fonte
+            ) / den[::2,1::2]
+
+            old = T[1:-1:2, 2:-1:2]
+            new = (1 - omega)*old + omega*Tgs
+            max_diff = max(max_diff, np.max(np.abs(new - old)))
+            T[1:-1:2, 2:-1:2] = new
+
+            Tgs = (
+                ke[1::2,::2]*T[3::2,1:-1:2] +
+                kw[1::2,::2]*T[1:-2:2,1:-1:2] +
+                kn[1::2,::2]*T[2:-1:2,2::2] +
+                ks[1::2,::2]*T[2:-1:2,:-2:2] +
+                termo_fonte
+            ) / den[1::2,::2]
+
+            old = T[2:-1:2, 1:-1:2]
+            new = (1 - omega)*old + omega*Tgs
+            max_diff = max(max_diff, np.max(np.abs(new - old)))
+            T[2:-1:2, 1:-1:2] = new
 
             if (n % frame_skip == 0):
                 historico.append((n, T.copy()))
-            
+
         return historico
 
     def animar_comparacao(self, hist_jacobi, hist_gs, intervalo_ms: int = 50, filename: str = None):
@@ -446,7 +486,7 @@ class PlacaTermica:
             # Verifica se já chegamos perto o suficiente do alvo
             if abs(erro_novo) < tolerancia:
                 print(f"\n>>> SUCESSO! T_c ideal encontrado: {Tc_novo:.4f}°C")
-                self.temperaturas = mapa_temp.flatten() # Salva para poder usar o plota_placa
+                self.T = mapa_temp.flatten() # Salva para poder usar o plota_placa
                 return Tc_novo
             
             # Atualiza os valores para o próximo loop
@@ -459,7 +499,7 @@ class PlacaTermica:
     def get_central_profile(self):
         """Retorna o perfil de temperaturas ao longo do eixo X central (y = Ly/2)."""
         j_center = self.Ny // 2
-        Z = np.copy(self.temperaturas).reshape(self.Ny, self.Nx)
+        Z = np.copy(self.T).reshape(self.Ny, self.Nx)
         x = np.linspace(0.0, self.Lx, self.Nx)
         return x, Z[j_center, :]
     
@@ -474,14 +514,37 @@ class PlacaTermica:
         plt.legend()
         plt.show()
 
-    def resolver_jacobi(self, borda, epsilon, max_iter=1000):
-        tempo_inicio = time.time()
+    def _obter_vizinhos(self):
+        k = None
+
+        if callable(self.k):
+            x = np.linspace(0, self.Lx, self.Nx)
+            y = np.linspace(0, self.Ly, self.Ny)
+
+            X, Y = np.meshgrid(x, y, indexing="ij")
+
+            k = self.k(X, Y)
+        else:
+            k = self.k * np.ones((self.Nx, self.Ny))
+
+        kc = k[1:-1, 1:-1]
+
+        ke = 2*kc*k[2:,1:-1] / (kc + k[2:,1:-1])
+        kw = 2*kc*k[:-2,1:-1] / (kc + k[:-2,1:-1])
+        kn = 2*kc*k[1:-1,2:] / (kc + k[1:-1,2:])
+        ks = 2*kc*k[1:-1,:-2] / (kc + k[1:-1,:-2])
+
+        den = ke + kw + kn + ks
+
+        return ke, kw, kn, ks, den
+
+    def _res_jacobi_uniforme(self, borda, tol, max_iter):
         T = self._malha_iterativa(borda)
-        tempo_fim = time.time()
-        self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
 
         tempo_inicio = time.time()
         termo_fonte = (self.ds * self.fonte_calor) / self.k
+
+        sucesso = False
 
         for _ in range(max_iter):
             T_new = T.copy()
@@ -491,64 +554,244 @@ class PlacaTermica:
                 termo_fonte
             )
 
-            if np.linalg.norm(T_new - T, np.inf) < epsilon:
-                self.temperaturas = T_new.T.reshape(self.N_total)
-                
-                tempo_fim = time.time()
-                self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
-                self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
-                
-                return self.temperaturas
+            diff = np.max(T_new - T)
 
-            T = T_new
+            T[:] = T_new
 
-        self.temperaturas = T.T.reshape(self.N_total)
+            if diff < tol:
+                sucesso = True
+                break
+
+        self.T = T.T.reshape(self.N_total)
 
         tempo_fim = time.time()
         self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
         self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
 
-        print(f"O método de Jacobi não converge em {max_iter} iterações, para epsilon={epsilon}.")
-        return self.temperaturas
+        if not sucesso:
+            print("Número máximo de iterações atingido (Jacobi).")
 
-    def resolver_gauss_seidel(self, borda, epsilon, max_iter=1000):
-        tempo_inicio = time.time()
+        return self.T
+    
+    def _res_jacobi_variavel(self, borda, tol, max_iter):
         T = self._malha_iterativa(borda)
-        tempo_fim = time.time()
-        self.tempos_execucao['montagem'] = tempo_fim - tempo_inicio
 
         tempo_inicio = time.time()
+        sucesso = False
+
+        ke, kw, kn, ks, den = self._obter_vizinhos()
+
+        termo_fonte = self.ds * self.fonte_calor
+
+        for _ in range(max_iter):
+            T_new = T.copy()
+
+            T_new[1:-1, 1:-1] = (
+                ke*T[2:, 1:-1] + kw*T[:-2, 1:-1] +
+                kn*T[1:-1, 2:] + ks*T[1:-1, :-2] +
+                termo_fonte
+            ) / den
+
+            diff = np.max(T_new - T)
+
+            T[:] = T_new
+
+            if diff < tol:
+                sucesso = True
+                break
+
+        self.T = T.T.reshape(self.N_total)
+
+        tempo_fim = time.time()
+        self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
+        self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
+
+        if not sucesso:
+            print("Número máximo de iterações atingido (Jacobi).")
+
+        return self.T
+
+    def resolver_jacobi(self, borda, tol, max_iter=1000):
+        if callable(self.k):
+            return self._res_jacobi_variavel(borda, tol, max_iter)
+        else:
+            return self._res_jacobi_uniforme(borda, tol, max_iter)
+
+    def _res_gs_rb_uniforme(self, borda, tol, max_iter, omega):
+        T = self._malha_iterativa(borda)
+
+        tempo_inicio = time.time()
+        sucesso = False
         termo_fonte = (self.ds * self.fonte_calor) / self.k
-        
+
         for _ in range(max_iter):
             T_old = T.copy()
 
-            for i in range(1, self.Nx - 1):
-                for j in range(1, self.Ny - 1):
-                    T[i, j] = 0.25 * (
-                        T[i+1, j] + T[i-1, j] + 
-                        T[i, j+1] + T[i, j-1] + 
-                        termo_fonte
-                    )
+            Tgs = 0.25 * (
+                T[2::2, 1:-1:2] + T[:-2:2, 1:-1:2] +
+                T[1:-1:2, 2::2] + T[1:-1:2, :-2:2] +
+                termo_fonte
+            )
+            T[1:-1:2, 1:-1:2] = (1 - omega) * T[1:-1:2, 1:-1:2] + omega * Tgs
 
-            if np.linalg.norm(T - T_old, np.inf) < epsilon:
-                self.temperaturas = T.T.reshape(self.N_total)
+            Tgs = 0.25 * (
+                T[3::2, 2:-1:2] + T[1:-2:2, 2:-1:2] +
+                T[2:-1:2, 3::2] + T[2:-1:2, 1:-2:2] +
+                termo_fonte
+            )
+            T[2:-1:2, 2:-1:2] = (1 - omega) * T[2:-1:2, 2:-1:2] + omega * Tgs
 
-                tempo_fim = time.time()
-                self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
-                self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
+            Tgs = 0.25 * (
+                T[2::2, 2:-1:2] + T[:-2:2, 2:-1:2] +
+                T[1:-1:2, 3::2] + T[1:-1:2, 1:-2:2] +
+                termo_fonte
+            )
+            T[1:-1:2, 2:-1:2] = (1 - omega) * T[1:-1:2, 2:-1:2] + omega * Tgs
 
-                return self.temperaturas
+            Tgs = 0.25 * (
+                T[3::2, 1:-1:2] + T[1:-2:2, 1:-1:2] +
+                T[2:-1:2, 2::2] + T[2:-1:2, :-2:2] +
+                termo_fonte
+            )
+            T[2:-1:2, 1:-1:2] = (1 - omega) * T[2:-1:2, 1:-1:2] + omega * Tgs
 
-        self.temperaturas = T.T.reshape(self.N_total)
-        
+            if np.max(T - T_old) < tol:
+                sucesso = True
+                break
+
+        self.T = T.T.reshape(self.N_total)
+
         tempo_fim = time.time()
         self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
         self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
 
-        print(f"O método de Gauss-Seidel não converge em {max_iter} iterações, para epsilon={epsilon}.")
+        if not sucesso:
+            print("Número máximo de iterações atingido (Gauss-Seidel).")
+                
+        return self.T
+    
+    def _res_gs_rb_variavel(self, borda, tol, max_iter, omega):
+        T = self._malha_iterativa(borda)
 
-        return self.temperaturas
+        tempo_inicio = time.time()
+        sucesso = False
+        
+        ke, kw, kn, ks, den = self._obter_vizinhos()
+        termo_fonte = self.ds * self.fonte_calor
+
+        for _ in range(max_iter):
+            max_diff = 0.0
+
+            Tgs = (
+                ke[::2, ::2]*T[2::2,1:-1:2] +
+                kw[::2, ::2]*T[:-2:2,1:-1:2] +
+                kn[::2, ::2]*T[1:-1:2,2::2] +
+                ks[::2, ::2]*T[1:-1:2,:-2:2] +
+                termo_fonte
+            ) / den[::2, ::2]
+
+            old = T[1:-1:2, 1:-1:2]
+            new = (1 - omega)*old + omega*Tgs
+            max_diff = max(max_diff, np.max(np.abs(new - old)))
+            T[1:-1:2, 1:-1:2] = new
+
+            Tgs = (
+                ke[1::2,1::2]*T[3::2,2:-1:2] +
+                kw[1::2,1::2]*T[1:-2:2,2:-1:2] +
+                kn[1::2,1::2]*T[2:-1:2,3::2] +
+                ks[1::2,1::2]*T[2:-1:2,1:-2:2] +
+                termo_fonte
+            ) / den[1::2,1::2]
+
+            old = T[2:-1:2, 2:-1:2]
+            new = (1 - omega)*old + omega*Tgs
+            max_diff = max(max_diff, np.max(np.abs(new - old)))
+            T[2:-1:2, 2:-1:2] = new
+
+            Tgs = (
+                ke[::2,1::2]*T[2::2,2:-1:2] +
+                kw[::2,1::2]*T[:-2:2,2:-1:2] +
+                kn[::2,1::2]*T[1:-1:2,3::2] +
+                ks[::2,1::2]*T[1:-1:2,1:-2:2] +
+                termo_fonte
+            ) / den[::2,1::2]
+
+            old = T[1:-1:2, 2:-1:2]
+            new = (1 - omega)*old + omega*Tgs
+            max_diff = max(max_diff, np.max(np.abs(new - old)))
+            T[1:-1:2, 2:-1:2] = new
+
+            Tgs = (
+                ke[1::2,::2]*T[3::2,1:-1:2] +
+                kw[1::2,::2]*T[1:-2:2,1:-1:2] +
+                kn[1::2,::2]*T[2:-1:2,2::2] +
+                ks[1::2,::2]*T[2:-1:2,:-2:2] +
+                termo_fonte
+            ) / den[1::2,::2]
+
+            old = T[2:-1:2, 1:-1:2]
+            new = (1 - omega)*old + omega*Tgs
+            max_diff = max(max_diff, np.max(np.abs(new - old)))
+            T[2:-1:2, 1:-1:2] = new
+
+            if max_diff < tol:
+                sucesso = True
+                break
+
+        self.T = T.T.reshape(self.N_total)
+
+        tempo_fim = time.time()
+        self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
+        self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
+
+        if not sucesso:
+            print("Número máximo de iterações atingido (Gauss-Seidel).")
+                
+        return self.T
+
+    def resolver_gauss_seidel_rb(self, borda, tol, max_iter=1000, omega=1.85):
+        if callable(self.k):
+            return self._res_gs_rb_variavel(borda, tol, max_iter, omega)
+        else:
+            return self._res_gs_rb_uniforme(borda, tol, max_iter, omega)
+
+    def resolver_gauss_seidel(self, borda, tol, max_iter=1000, omega=1.85):
+        self._montar_esparsa(borda)
+
+        tempo_inicio = time.time()
+
+        self.T = self._chute_inicial(borda)
+
+        D = sp.diags(self.A.diagonal())
+        L = sp.tril(self.A, k=-1)
+        U = sp.triu(self.A, k=1)
+
+        DL = (D + omega * L).tocsc()
+        UR = (omega * U + (omega - 1.0) * D).tocsr()
+
+        sucesso = False
+
+        del D, L, U
+
+        for _ in range(max_iter):
+            T_new = spla.spsolve_triangular(DL, omega * self.b - UR @ self.T, lower=True)
+
+            diff = np.max(T_new - self.T)
+
+            self.T[:] = T_new
+
+            if diff < tol:
+                sucesso = True
+                break
+
+        tempo_fim = time.time()
+        self.tempos_execucao['resolucao'] = tempo_fim - tempo_inicio
+        self.tempos_execucao['total'] = self.tempos_execucao['montagem'] + self.tempos_execucao['resolucao']
+
+        if not sucesso:
+            print("Número máximo de iterações atingido (Gauss-Seidel).")
+
+        return self.T
 
 def borda_padrao(Nx:int, Ny:int):
     borda = []
@@ -694,6 +937,8 @@ def exercicio_3():
 
     temp_bordas = borda_padrao(Nx, Ny)
 
+    # placa.resolver_gauss_seidel_rb(temp_bordas, tol=1e-12, max_iter=10000, omega=1.85)
+    # placa.resolver_jacobi(temp_bordas, tol=1e-12, max_iter=100000)
     placa.resolver(temp_bordas)
     
     print(f"Temperatura Máxima com k variável: {placa.temp_max():.2f}")
@@ -773,7 +1018,7 @@ def exercicio_5():
         fronteira_total = borda + circulo
         
         placa.resolver(fronteira_total)
-        T_obs.append(placa.temperaturas[ic_escolhido])
+        T_obs.append(placa.T[ic_escolhido])
         
     # Monta sistema linear para encontrar a, b e c:
     # [TR1, TC1, 1] [a] = [Tk1]
@@ -807,20 +1052,20 @@ def exercicio_3_extra(T_estrela:float=39.5):
 def exercicio_2_extra():
     print("\n--- EXERCÍCIO 2 EXTRA ---")
     placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
-    fronteira = borda_padrao(placa.Nx, placa.Ny)
+    borda = borda_padrao(placa.Nx, placa.Ny)
 
-    historico_jac = placa.gerar_historico_jacobi(fronteira, frame_skip=5)
-    historico_gs = placa.gerar_historico_gauss_seidel(fronteira, frame_skip=5)
+    historico_jac = placa.gerar_historico_jacobi(borda, max_iter=1000, frame_skip=5)
+    historico_gs = placa.gerar_historico_gauss_seidel(borda, max_iter=1000, omega=1.0, frame_skip=5)
     placa.animar_comparacao(historico_jac, historico_gs, intervalo_ms=40)
     
-    placa.resolver(fronteira)
+    placa.resolver(borda)
 
     placa.plota_placa(flag_type='contour')
     placa.plota_placa(flag_type='surface')
 
 def exercicio_1_extra():
     print("\n--- EXERCÍCIO 1 EXTRA ---")
-    # ex_1_extra_tolerancia()
+    ex_1_extra_tolerancia()
     ex_1_extra_malha()
 
 def ex_1_extra_tolerancia():
@@ -838,28 +1083,28 @@ def ex_1_extra_tolerancia():
 
     borda = borda_padrao(Nx, Ny)
 
-    tolerancia = list(map(lambda n:10**(-n), range(2,15)))
+    tolerancias = list(map(lambda n:10**(-n), range(2,14)))
 
     tempo_jacobi = []
-    tempo_gauss_seidel = []
+    tempo_gs = []
 
     print("\nTolerância | Jacobi (s)   | Gauss-Seidel (s)")
 
-    for epsilon in tolerancia:
-        placa.resolver_jacobi(borda, epsilon, max_iter=1000000)
+    for tol in tolerancias:
+        placa.resolver_jacobi(borda, tol, max_iter=1000000)
         t1 = placa.tempos_execucao['total']
 
-        placa.resolver_gauss_seidel(borda, epsilon, max_iter=1000000)
+        placa.resolver_gauss_seidel_rb(borda, tol, omega=1.85, max_iter=1000)
         t2 = placa.tempos_execucao['total']
 
         tempo_jacobi.append(t1)
-        tempo_gauss_seidel.append(t2)
+        tempo_gs.append(t2)
 
-        print(f"{epsilon:.2e}".ljust(10), f"| {t1:.6e} | {t2:.6e}")
+        print(f"{tol:.2e}".ljust(10), f"| {t1:.6e} | {t2:.6e}")
 
     plt.figure(figsize=(6,4))
-    plt.plot(tolerancia, tempo_jacobi, 'r-o', label='Jacobi')
-    plt.plot(tolerancia, tempo_gauss_seidel, 'b-o', label='Gauss-Seidel')
+    plt.plot(tolerancias, tempo_jacobi, 'r-o', label='Jacobi')
+    plt.plot(tolerancias, tempo_gs, 'b-o', label='Gauss-Seidel (SOR)')
 
     plt.xlabel('Tolerância (°C)')
     plt.ylabel('Tempo (s)')
@@ -877,8 +1122,8 @@ def ex_1_extra_tolerancia():
 def ex_1_extra_malha():
     print("\n--- GRÁFICO TEMPO X SUBDIVISÕES ---")
     
-    subdivisoes = list(map(lambda n: (n*10+1,n*5+1), range(2, 13)))
-    epsilon = 1e-6
+    subdivisoes = list(map(lambda n: (n*10+1,n*5+1), range(2, 33)))
+    tol = 1e-12
 
     num_celulas = []
     tempo_jacobi = []
@@ -900,10 +1145,10 @@ def ex_1_extra_malha():
 
         borda = borda_padrao(Nx, Ny)
 
-        placa.resolver_jacobi(borda, epsilon, max_iter=100000000)
+        placa.resolver_jacobi(borda, tol, max_iter=1000000)
         t1 = placa.tempos_execucao['total']
 
-        placa.resolver_gauss_seidel(borda, epsilon, max_iter=100000000)
+        placa.resolver_gauss_seidel_rb(borda, tol, omega=1.85, max_iter=10000)
         t2 = placa.tempos_execucao['total']
 
         num_celulas.append(N_total)
@@ -914,7 +1159,7 @@ def ex_1_extra_malha():
 
     plt.figure(figsize=(6,4))
     plt.plot(num_celulas, tempo_jacobi, 'r-o', label='Jacobi')
-    plt.plot(num_celulas, tempo_gauss_seidel, 'b-o', label='Gauss-Seidel')
+    plt.plot(num_celulas, tempo_gauss_seidel, 'b-o', label='Gauss-Seidel (SOR)')
 
     plt.xlabel('Número de subdivisões')
     plt.ylabel('Tempo (s)')
@@ -922,19 +1167,19 @@ def ex_1_extra_malha():
     # plt.xscale('log')
     # plt.yscale('log')
 
-    plt.title(f'Tempo de execução por subdivisões (Tolerância={epsilon})')
+    plt.title(f'Tempo de execução por subdivisões (Tolerância={tol})')
     plt.grid()
     plt.legend()
     plt.show()
 
 
 if __name__ == "__main__":
-    exercicio_1()
-    exercicio_2(T_c=30.0)
-    exercicio_3()
-    exercicio_4()
-    exercicio_5()
+    # exercicio_1()
+    # exercicio_2(T_c=30.0)
+    # exercicio_3()
+    # exercicio_4()
+    # exercicio_5()
 
-    # exercicio_1_extra()
-    #exercicio_2_extra(T_estrela=30.0)
-    #exercicio_3_extra()
+    exercicio_1_extra()
+    # exercicio_2_extra()
+    # exercicio_3_extra(T_estrela=30.0)
