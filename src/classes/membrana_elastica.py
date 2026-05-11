@@ -23,10 +23,12 @@ class MembranaElastica:
 
         self.rho = 900
 
+        self.R = 4e-3
+
     def ij2n(self, i:int, j:int):
         return i + j * self.Nx
 
-    def build_eigen(self, mask:list[(int, int)]):
+    def build_eigen(self):
         Nx = self.Nx
         Ny = self.Ny
         nunk = self.nunk
@@ -66,9 +68,21 @@ class MembranaElastica:
             self.K[Ic,:], self.K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
         
         # Processar os pontos da mascara para uma membrana circular
-        for (i, j) in mask:
-            Ic = self.ij2n(i,j)
-            self.K[Ic,:], self.K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
+        hx = self.hx
+        hy = self.hy
+
+        R = self.R
+
+        for i in range(0, Nx):
+            for j in range(0, Ny):
+                x = (i - Nx // 2) * hx
+                y = (j - Ny // 2) * hy
+
+                r_squared = x*x + y*y
+
+                if r_squared > R*R:
+                    Ic = self.ij2n(i,j)
+                    self.K[Ic,:], self.K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
 
         # Mass matrix: Simple case, multiple of identity
         rho = self.rho
@@ -77,5 +91,3 @@ class MembranaElastica:
         self.M = rho * e * sp.sparse.identity(nunk, format='csr')
 
         return self.K, self.M
-
-    
