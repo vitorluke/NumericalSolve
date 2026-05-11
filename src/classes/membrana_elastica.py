@@ -2,28 +2,29 @@ import numpy as np
 import scipy as sp
 
 class MembranaElastica:
-    def __init__(self, Nx:int, Ny:int, Lx:float, Ly:float):
+    def __init__(self, Nx:int, Ny:int, R:float):
         self.Nx = Nx
         self.Ny = Ny
         self.nunk = Nx*Ny
 
-        self.Lx = Lx
-        self.Ly = Ly
+        self.Lx = 2 * R
+        self.Ly = 2 * R
+
+        self.R = R
+        
+        self.hx = self.Lx / (Nx - 1)
+        self.hy = self.Ly / (Ny - 1)
+
+        self.h = self.hx * self.hy      # Autenticar essa expressão
+        
+        self.sigma = 200
+        self.e = 0.1e-3
+        self.rho = 900
 
         self.K = None
         self.M = None
 
-        self.sigma = 200
-        self.e = 0.1e-3
-
-        self.hx = Lx / (Nx - 1)
-        self.hy = Ly / (Ny - 1)
-
-        self.h = self.hx * self.hy      # Autenticar essa expressão
-
-        self.rho = 900
-
-        self.R = 4e-3
+        self.build_eigen()
 
     def ij2n(self, i:int, j:int):
         return i + j * self.Nx
