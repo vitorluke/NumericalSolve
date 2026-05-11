@@ -68,9 +68,7 @@ class MembranaElastica:
         # Processar os pontos da mascara para uma membrana circular
         for (i, j) in mask:
             Ic = self.ij2n(i,j)
-            self.K[Ic,:], self.K[:, Ic] = 0
-            self.K[Ic, Ic] = big_number
-
+            self.K[Ic,:], self.K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
 
         # Mass matrix: Simple case, multiple of identity
         rho = self.rho
