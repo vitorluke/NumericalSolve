@@ -1,5 +1,6 @@
 import numpy as np
 import scipy as sp
+import matplotlib.pyplot as plt
 
 class MembranaElastica:
     def __init__(self, Nx:int, Ny:int, R:float):
@@ -15,60 +16,51 @@ class MembranaElastica:
         self.hx = self.Lx / (Nx - 1)
         self.hy = self.Ly / (Ny - 1)
 
-        self.h = self.hx * self.hy      # Autenticar essa expressão
+        self.ds = self.hx * self.hy
         
-        self.sigma = 200
         self.e = 0.1e-3
+        self.sigma = 200
         self.rho = 900
 
         self.K = None
         self.M = None
 
-        self.build_eigen()
+        self.build_laplacian()
 
     def ij2n(self, i:int, j:int):
         return i + j * self.Nx
 
-    def build_eigen(self):
+    def build_laplacian(self):
         Nx = self.Nx
         Ny = self.Ny
         nunk = self.nunk
 
         sigma = self.sigma
-        h = self.h
+        ds = self.ds
 
         d1 = 4.0*np.ones(nunk)
-
         d2 = -np.ones(nunk-1)
         d3 = -np.ones(nunk-Nx)
         
-        self.K = (sigma/h**2) * sp.sparse.diags([d3, d2, d1, d2, d3], [-Nx, -1, 0, 1, Nx], format='csr')
+        K = sigma / ds * sp.sparse.diags([d3, d2, d1, d2, d3], [-Nx, -1, 0, 1, Nx], format='csr')
         
-        # Force the eigenvalues associated to restricted points
-        # to be a big number as compared to fundamental modes
-        
-        big_number = 10000
+        big_number = 1e4
         Iden = big_number * sp.sparse.identity(nunk, format='csr')
         
-        # Lados verticais
-        
         for k in range(0,Ny):
-            Ic = self.ij2n(0,k) # Left
-            self.K[Ic,:], self.K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
+            Ic = self.ij2n(0,k)
+            K[Ic,:], K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
             
-            Ic = self.ij2n(Nx-1,k) # Right
-            self.K[Ic,:], self.K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
-        
-        # Lados horizontais
+            Ic = self.ij2n(Nx-1,k)
+            K[Ic,:], K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
         
         for k in range(0,Nx):
-            Ic = self.ij2n(k,0) # Bottom
-            self.K[Ic,:], self.K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
+            Ic = self.ij2n(k,0)
+            K[Ic,:], K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
             
-            Ic = self.ij2n(k,Ny-1) # Top
-            self.K[Ic,:], self.K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
+            Ic = self.ij2n(k,Ny-1)
+            K[Ic,:], K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
         
-        # Processar os pontos da mascara para uma membrana circular
         hx = self.hx
         hy = self.hy
 
@@ -76,19 +68,65 @@ class MembranaElastica:
 
         for i in range(0, Nx):
             for j in range(0, Ny):
-                x = (i - Nx // 2) * hx
-                y = (j - Ny // 2) * hy
+                x = i * hx - R
+                y = j * hy - R
 
-                r_squared = x*x + y*y
+                dist_squared = x*x + y*y
 
-                if r_squared > R*R:
+                if dist_squared > R*R:
                     Ic = self.ij2n(i,j)
-                    self.K[Ic,:], self.K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
+                    K[Ic,:], K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
 
-        # Mass matrix: Simple case, multiple of identity
         rho = self.rho
         e = self.e
 
-        self.M = rho * e * sp.sparse.identity(nunk, format='csr')
+        M = rho * e * sp.sparse.identity(nunk, format='csr')
+
+        self.K = K
+        self.M = M
 
         return self.K, self.M
+    
+    def solve_modes(self, nmodes=10):
+        assert(not(self.K is None or self.M is None))
+
+        Lam, _ = sp.sparse.linalg.eigsh(self.K, k=nmodes*2, M=self.M, which='SM')
+
+        Lam = np.real(Lam)
+        Lam = np.sort(Lam)
+
+        freq = np.sqrt(Lam)/(2*np.pi)
+
+        f_01_theorical = 2.4048 / (2 * np.pi * self.R) * np.sqrt(self.sigma / (self.rho * self.e))
+
+        freq = freq[freq > f_01_theorical / 2][:nmodes]
+
+        print(freq)
+
+        return freq
+
+    def plot_modes(self, nmodes=10):
+        freq = self.solve_modes(nmodes)
+        mode = np.linspace(1, nmodes, nmodes)
+
+        plt.figure(figsize=(6,4))
+        ax = plt.gca()
+        ax.yaxis.get_major_formatter().set_useOffset(False)
+
+        plt.plot(mode, freq, marker='o')
+
+        plt.title("Modos fundamentais da membrana")
+
+        plt.xlabel("Modo")
+        plt.ylabel("Frequência (Hz)")
+
+        plt.grid(True)
+
+        plt.show()
+
+def main():
+    membrana = MembranaElastica(51, 51, 0.4e-2)
+    membrana.plot_modes(10)
+
+if __name__ == "__main__":
+    main()
