@@ -149,6 +149,8 @@ def ex_02():
     R = 0.4e-2
     grids = list(map(lambda n: (20*n+1,20*n+1), range(1, 6)))
 
+    print("Tabela das frequências fundamentais da membrana (Hz)")
+
     print("-"*124)
     print("| Modo".ljust(13), end="|")
 
@@ -239,7 +241,7 @@ def ex_05():
     plt.title("Energia Elástica Média vs Frequência Forçante Adimensional")
     plt.xlabel("$\hat{\omega}_*$")
     plt.ylabel("Mean Energy ($A_e$)")
-    plt.ylim(1e-1, 2e3)
+    plt.ylim(1e-1, 1e4)
     plt.grid(True, which="both", ls="-", alpha=0.3)
     plt.legend()
     plt.show()
