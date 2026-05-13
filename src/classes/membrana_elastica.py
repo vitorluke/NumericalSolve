@@ -90,7 +90,7 @@ class MembranaElastica:
     def solve_modes(self, nmodes=10):
         assert(not(self.K is None or self.M is None))
 
-        Lam, _ = sp.sparse.linalg.eigsh(self.K, k=nmodes*2, M=self.M, which='SM')
+        Lam, _ = sp.sparse.linalg.eigsh(self.K, k=nmodes*4, M=self.M, which='SM')
 
         Lam = np.real(Lam)
         Lam = np.sort(Lam)
@@ -100,8 +100,6 @@ class MembranaElastica:
         f_01_theorical = 2.4048 / (2 * np.pi * self.R) * np.sqrt(self.sigma / (self.rho * self.e))
 
         freq = freq[freq > f_01_theorical / 2][:nmodes]
-
-        print(freq)
 
         return freq
 
@@ -124,9 +122,37 @@ class MembranaElastica:
 
         plt.show()
 
+def ex_02():
+    R = 0.4e-2
+    grids = list(map(lambda n: (20*n+1,20*n+1), range(1, 6)))
+
+    print("-"*163)
+    print("Modo".ljust(12), end="|")
+
+    for i in range(1, 11):
+        print(f" {i}".ljust(14), end="|")
+
+    print()
+    print("-"*163)
+
+    for (Nx, Ny) in grids:
+        membrana = MembranaElastica(Nx, Ny, R)
+        modes = membrana.solve_modes(10)
+
+        print(f"({Nx}, {Ny})".ljust(12), end="|")
+
+        for f in modes:
+            print(f" {f:.6f}".ljust(14), end="|")
+
+        print()
+
+    print("-"*163)
+
+    membrana = MembranaElastica(101, 101, R)
+    membrana.plot_modes()
+
 def main():
-    membrana = MembranaElastica(51, 51, 0.4e-2)
-    membrana.plot_modes(10)
+    ex_02()
 
 if __name__ == "__main__":
     main()
