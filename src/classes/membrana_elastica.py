@@ -126,27 +126,27 @@ def ex_02():
     R = 0.4e-2
     grids = list(map(lambda n: (20*n+1,20*n+1), range(1, 6)))
 
-    print("-"*163)
-    print("Modo".ljust(12), end="|")
+    print("-"*123)
+    print("| Modo".ljust(12), end="|")
 
     for i in range(1, 11):
-        print(f" {i}".ljust(14), end="|")
+        print(f" {i}".ljust(10), end="|")
 
     print()
-    print("-"*163)
+    print("-"*123)
 
     for (Nx, Ny) in grids:
         membrana = MembranaElastica(Nx, Ny, R)
         modes = membrana.solve_modes(10)
 
-        print(f"({Nx}, {Ny})".ljust(12), end="|")
+        print(f"| ({Nx}, {Ny})".ljust(12), end="|")
 
         for f in modes:
-            print(f" {f:.6f}".ljust(14), end="|")
+            print(f" {f:.2f}".ljust(10), end="|")
 
         print()
 
-    print("-"*163)
+    print("-"*123)
 
     membrana = MembranaElastica(101, 101, R)
     membrana.plot_modes()
