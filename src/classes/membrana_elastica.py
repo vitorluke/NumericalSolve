@@ -28,13 +28,13 @@ class MembranaElastica:
         N = self.N
         nunk = self.nunk
 
-        ds_hat = 4.0 / ((N-1)*(N-1))
+        h_sq_hat = 4.0 / ((N-1)*(N-1))
 
         d1 = 4.0*np.ones(nunk)
         d2 = -np.ones(nunk-1)
         d3 = -np.ones(nunk-N)
         
-        K = 1.0 / ds_hat * sp.sparse.diags([d3, d2, d1, d2, d3], [-N, -1, 0, 1, N], format='csr')
+        K = 1.0 / h_sq_hat * sp.sparse.diags([d3, d2, d1, d2, d3], [-N, -1, 0, 1, N], format='csr')
         
         big_number = 1e7
         Iden = big_number * sp.sparse.identity(nunk, format='csr')
@@ -53,8 +53,6 @@ class MembranaElastica:
             Ic = self.ij2n(k,N-1)
             K[Ic,:], K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
         
-        R = self.R
-
         h_hat = 2 / (N - 1)
 
         for i in range(0, N):
@@ -107,7 +105,7 @@ class MembranaElastica:
 
         return freqs, omegas, modes
 
-    def plot_modes(self, nmodes=10, flag_type='contour'):
+    def plot_modes(self, nmodes=10, flag_type='surface'):
         freq, _, modes = self.solve_modes(nmodes)
 
         for i in range(modes.shape[1]):
@@ -224,13 +222,13 @@ def ex_04():
     ci = alphas / denominador
 
     print(f"omega*^ = {omega_star_hat} rad/s e beta = {beta}")
-    print("-" * 80)
-    print(f"| {'Modo':<6} | {'Freq Nat (Hz)':<15} | {'alpha_i (Força)':<20} | {'c_i (Resposta)':<20}")
-    print("-" * 80)
+    print("-" * 54)
+    print(f"| {'Modo':<4} | {'Freq nat':<8} | {'alpha_i (Força)':<15} | {'c_i (Resposta)':<14} |")
+    print("-" * 54)
 
     for i in range(len(freqs_hat)):
-        print(f"{i+1:<6} | {freqs_hat[i]:<15.2f} | {alphas[i]:<20.6e} | {ci[i]:<20.6e}")
-    print("-" * 80)
+        print(f"| {i+1:<4} | {freqs_hat[i]:<8.4f} | {alphas[i]:<15.6e} | {ci[i]:<14.6e} |")
+    print("-" * 54)
 
     return ci, alphas
     
@@ -281,8 +279,8 @@ def ex_05():
 
 def main():
     # ex_02()
-    # ex_04()
-    ex_05()
+    ex_04()
+    # ex_05()
 
 if __name__ == "__main__":
     main()
