@@ -280,9 +280,9 @@ def ex_05():
     plt.show()
 
 def main():
-    ex_02()
+    # ex_02()
     # ex_04()
-    # ex_05()
+    ex_05()
 
 if __name__ == "__main__":
     main()
