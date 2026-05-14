@@ -79,14 +79,22 @@ class MembranaElastica:
 
         return self.K, self.M
     
-    def solve_modes(self, nmodes=10):
+    def solve_modes_adimensional(self, nmodes=10):
         assert(not(self.K is None or self.M is None))
 
-        Lam, modes = sp.sparse.linalg.eigsh(self.K, k=nmodes, M=self.M, which='SM')
+        Lam, modes = sp.sparse.linalg.eigsh(self.K, k=nmodes, M=self.M, which='SM', tol=1e-9)
 
         idx = np.argsort(Lam)
         Lam = np.real(Lam[idx])
         modes = modes[:, idx]
+
+        omegas = np.sqrt(Lam)
+        freqs = omegas / (2 * np.pi)
+
+        return freqs, omegas, modes
+    
+    def solve_modes(self, nmodes=10):
+        freqs, omegas, modes = self.solve_modes_adimensional(nmodes)
 
         R = self.R
         sigma = self.sigma
@@ -95,12 +103,12 @@ class MembranaElastica:
 
         scale = np.sqrt(sigma/(rho * e * R * R))
 
-        omega = scale * np.sqrt(Lam)
-        freq = omega / (2 * np.pi)
+        omegas *= scale
+        freqs *= scale
 
-        return freq, omega, modes
+        return freqs, omegas, modes
 
-    def plot_modes(self, nmodes=10, flag_type='surface'):
+    def plot_modes(self, nmodes=10, flag_type='contour'):
         _, _, modes = self.solve_modes(nmodes)
 
         for i in range(modes.shape[1]):
@@ -133,7 +141,7 @@ class MembranaElastica:
         im2 = ax.contour(X, Y, Z, 20, linewidths=0.25, colors='k')
         
         cbar = fig.colorbar(im, ax=ax, orientation='horizontal')
-        cbar.set_label("Deslocamento vertical $w$ (m)")
+        cbar.set_label("$w$")
             
         plt.show()
 
@@ -152,10 +160,10 @@ class MembranaElastica:
 
         fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8,6))
         surf = ax.plot_surface(X, Y, Z, cmap='jet')
-        ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', zlabel='$w$ (m)')
+        ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', zlabel='$w$')
         
         cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
-        cbar.set_label("Deslocamento vertical $w$ (m)")
+        cbar.set_label("$w$")
         
         plt.show()
 
@@ -176,11 +184,11 @@ def ex_02():
 
     for (Nx, Ny) in grids:
         membrana = MembranaElastica(Nx, Ny, R)
-        freq, _, _ = membrana.solve_modes(10)
+        freqs, _, _ = membrana.solve_modes(10)
 
         print(f"| ({Nx}, {Ny})".ljust(13), end="|")
 
-        for f in freq:
+        for f in freqs:
             print(f" {f:.2f}".ljust(10), end="|")
 
         print()
@@ -192,89 +200,81 @@ def ex_02():
 
 def ex_04():
     R = 0.4e-2
-    Nx, Ny = 51, 51
+    Nx, Ny = 41, 41
     membrana = MembranaElastica(Nx, Ny, R)
+
+    x_hat = np.linspace(0, 2, Nx)
+    y_hat = np.linspace(0, 2, Ny)
+
+    X, Y = np.meshgrid(x_hat, y_hat)
+    Z_matrix = (X - 0.5)**2 + (Y - 0.5)**2
     
+    dist_r = np.sqrt((X - 1.0)**2 + (Y - 1.0)**2)
+    Z_matrix[dist_r > 1.0] = 0
+
+    Z = Z_matrix.flatten()
+
+    freqs_hat, omegas_hat, modes = membrana.solve_modes_adimensional(nmodes=membrana.nunk-1)
+    alphas = modes.T @ Z
+
+    omega_star_hat = 10
     beta = 0.1
-    f_star = 5000
-    omega_star = 2 * np.pi * f_star
-    n_solicitado = 10
 
-    freqs, omegas, modes = membrana.solve_modes(nmodes=n_solicitado)
-
-    modes_norm = np.zeros_like(modes)
-    for i in range(modes.shape[1]):
-        phi_i = modes[:, i]
-        norm_m = np.sqrt(phi_i.T @ (membrana.M @ phi_i))
-        modes_norm[:, i] = phi_i / norm_m
-
-    Z = np.zeros(membrana.nunk)
-    for j in range(membrana.Ny):
-        for i in range(membrana.Nx):
-            xi = i / (membrana.Nx - 1)
-            yi = j / (membrana.Ny - 1)
-            Z[membrana.ij2n(i, j)] = (xi - 0.5)**2 + (yi - 0.5)**2
-
-    alphas = modes_norm.T @ Z
-
-    denominador = np.sqrt((omegas**2 - omega_star**2)**2 + (beta * omega_star)**2)
+    denominador = np.sqrt((omegas_hat**2 - omega_star_hat**2)**2 + (beta * omega_star_hat)**2)
     ci = alphas / denominador
 
-    print(f"omega* = {omega_star} rad/s e beta = {beta}")
+    print(f"omega*^ = {omega_star_hat} rad/s e beta = {beta}")
     print("-" * 80)
     print(f"| {'Modo':<6} | {'Freq Nat (Hz)':<15} | {'alpha_i (Força)':<20} | {'c_i (Resposta)':<20}")
     print("-" * 80)
 
-    for i in range(len(freqs)):
-        print(f"{i+1:<6} | {freqs[i]:<15.2f} | {alphas[i]:<20.6e} | {ci[i]:<20.6e}")
+    for i in range(len(freqs_hat)):
+        print(f"{i+1:<6} | {freqs_hat[i]:<15.2f} | {alphas[i]:<20.6e} | {ci[i]:<20.6e}")
     print("-" * 80)
 
     return ci, alphas
     
 def ex_05():
     R = 0.4e-2
-    Nx, Ny = 51, 51
+    Nx, Ny = 61, 61
     membrana = MembranaElastica(Nx, Ny, R)
+
+    x_hat = np.linspace(0, 2, Nx)
+    y_hat = np.linspace(0, 2, Ny)
+
+    X, Y = np.meshgrid(x_hat, y_hat)
+    Z_matrix = (X - 0.5)**2 + (Y - 0.5)**2
     
-    ws_hat_range = np.logspace(np.log10(0.5), np.log10(100), 500)
-    betas = [0.01, 0.1, 1]
-    
-    omega_ref = (2.4048 / R) * np.sqrt(membrana.sigma / (membrana.rho * membrana.e))
+    dist_r = np.sqrt((X - 1.0)**2 + (Y - 1.0)**2)
+    Z_matrix[dist_r > 1.0] = 0
 
-    freqs, omegas, modes = membrana.solve_modes(nmodes=membrana.nunk-1)
+    Z = Z_matrix.flatten()
 
-    modes_norm = np.zeros_like(modes)
-    for i in range(modes.shape[1]):
-        phi_i = modes[:, i]
-        norm_m = np.sqrt(phi_i.T @ (membrana.M @ phi_i))
-        modes_norm[:, i] = phi_i / norm_m
+    _, omegas_hat, modes = membrana.solve_modes_adimensional(nmodes=membrana.nunk-1)
+    alphas = modes.T @ Z
 
-    Z = np.zeros(membrana.nunk)
-    for j in range(membrana.Ny):
-        for i in range(membrana.Nx):
-            xi, yi = i / (Nx - 1), j / (Ny - 1)
-            Z[membrana.ij2n(i, j)] = (xi - 0.5)**2 + (yi - 0.5)**2
-    
-    alphas = modes_norm.T @ Z
-
-    omega_n_hat = omegas / omega_ref
+    beta_values = [0.01, 0.1, 1]
+    ws_hat_range = np.linspace(0.5, 100, 5000)
 
     plt.figure(figsize=(10, 6))
     colors = ['red', 'magenta', 'green']
 
-    for beta, color in zip(betas, colors):
+    for beta, color in zip(beta_values, colors):
         Ae_list = []
         for ws_hat in ws_hat_range:
-            denominador = np.sqrt((omega_n_hat**2 - ws_hat**2)**2 + (beta * ws_hat)**2)
+            denominador = np.sqrt((omegas_hat**2 - ws_hat**2)**2 + (beta * ws_hat)**2)
             ci = alphas / denominador
             
-            Ae = 0.25 * np.sum((ci**2) * (omega_n_hat**2))
+            Ae = 0.25 * np.sum((ci**2) * (omegas_hat**2))
             Ae_list.append(Ae)
         
         plt.loglog(ws_hat_range, Ae_list, label=f'beta = {beta}', color=color, lw=1.5)
 
     plt.xlabel("$\hat{\omega}_*$")
     plt.ylabel("Energia média")
+
+    plt.ylim(1e-1, 1e5)
+
     plt.grid(True, which="both", ls="-", alpha=0.3)
     plt.legend()
     plt.show()
