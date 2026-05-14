@@ -28,20 +28,18 @@ class MembranaElastica:
         return i + j * self.Nx
 
     def build_laplacian(self):
-        Nx = self.Nx
-        Ny = self.Ny
+        Nx, Ny = self.Nx, self.Ny
         nunk = self.nunk
 
-        sigma = self.sigma
-        ds = self.ds
+        ds_hat = 4.0 / ((Nx-1)*(Ny-1))
 
         d1 = 4.0*np.ones(nunk)
         d2 = -np.ones(nunk-1)
         d3 = -np.ones(nunk-Nx)
         
-        K = sigma / ds * sp.sparse.diags([d3, d2, d1, d2, d3], [-Nx, -1, 0, 1, Nx], format='csr')
+        K = 1.0 / ds_hat * sp.sparse.diags([d3, d2, d1, d2, d3], [-Nx, -1, 0, 1, Nx], format='csr')
         
-        big_number = 1e4
+        big_number = 1e7
         Iden = big_number * sp.sparse.identity(nunk, format='csr')
         
         for k in range(0,Ny):
@@ -58,26 +56,23 @@ class MembranaElastica:
             Ic = self.ij2n(k,Ny-1)
             K[Ic,:], K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
         
-        hx = self.hx
-        hy = self.hy
-
         R = self.R
+
+        hx_hat = self.hx / R
+        hy_hat = self.hy / R
 
         for i in range(0, Nx):
             for j in range(0, Ny):
-                x = i * hx - R
-                y = j * hy - R
+                x = i * hx_hat - 1.0
+                y = j * hy_hat - 1.0
 
                 dist_squared = x*x + y*y
 
-                if dist_squared > R*R:
+                if dist_squared > 1.0:
                     Ic = self.ij2n(i,j)
                     K[Ic,:], K[:,Ic] = Iden[Ic,:], Iden[:,Ic]
 
-        rho = self.rho
-        e = self.e
-
-        M = rho * e * sp.sparse.identity(nunk, format='csr')
+        M = sp.sparse.identity(nunk, format='csr')
 
         self.K = K
         self.M = M
@@ -87,45 +82,81 @@ class MembranaElastica:
     def solve_modes(self, nmodes=10):
         assert(not(self.K is None or self.M is None))
 
-        k = min(nmodes*2, self.Nx*self.Ny - 1)
+        Lam, modes = sp.sparse.linalg.eigsh(self.K, k=nmodes, M=self.M, which='SM')
 
-        Lam, modes = sp.sparse.linalg.eigsh(self.K, k=k, M=self.M, which='SM')
+        idx = np.argsort(Lam)
+        Lam = np.real(Lam[idx])
+        modes = modes[:, idx]
 
-        Lam = np.real(Lam)
-        Lam = np.sort(Lam)
+        R = self.R
+        sigma = self.sigma
+        rho = self.rho
+        e = self.e
 
-        omega = np.sqrt(Lam)
+        scale = np.sqrt(sigma/(rho * e * R * R))
+
+        omega = scale * np.sqrt(Lam)
         freq = omega / (2 * np.pi)
-
-        f01 = 2.4048 / (2 * np.pi * self.R) * np.sqrt(self.sigma / (self.rho * self.e))
-
-        filter = freq > (f01 / 2)
-
-        freq = freq[filter][:nmodes]
-        omega = omega[filter][:nmodes]
-        modes = modes[:, filter][:, :nmodes]
 
         return freq, omega, modes
 
-    def plot_modes(self, nmodes=10):
-        freq, _, _ = self.solve_modes(nmodes)
+    def plot_modes(self, nmodes=10, flag_type='surface'):
+        _, _, modes = self.solve_modes(nmodes)
 
-        k = len(freq)
-        mode = np.linspace(1, k, k)
+        for i in range(modes.shape[1]):
+            mode = modes[:, i]
 
-        plt.figure(figsize=(6,4))
-        ax = plt.gca()
-        ax.yaxis.get_major_formatter().set_useOffset(False)
+            if flag_type == 'contour':
+                self._plot_contour(mode)
+            elif flag_type == 'surface':
+                self._plot_surface(mode)
 
-        plt.plot(mode, freq, marker='o')
+    def _plot_contour(self, mode):
+        Nx, Ny = self.Nx, self.Ny
+        R = self.R
 
-        plt.title("Modos fundamentais da membrana")
+        x = np.linspace(0.0, 2 * R, Nx)
+        y = np.linspace(0.0, 2 * R, Ny)
 
-        plt.xlabel("Modo")
-        plt.ylabel("Frequência (Hz)")
+        X, Y = np.meshgrid(x, y)
+        Z = mode.copy().reshape(Ny, Nx)
+        
+        r = (X - 0.004)**2 + (Y - 0.004)**2
+        Z[r > R*R] = 0
+    
+        fig, ax = plt.subplots(figsize=(8,4))
+        
+        ax.set_aspect('equal')
+        ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)')
+        
+        im = ax.contourf(X, Y, Z, 20, cmap='jet')
+        im2 = ax.contour(X, Y, Z, 20, linewidths=0.25, colors='k')
+        
+        cbar = fig.colorbar(im, ax=ax, orientation='horizontal')
+        cbar.set_label("Deslocamento vertical $w$ (m)")
+            
+        plt.show()
 
-        plt.grid(True)
+    def _plot_surface(self, mode):
+        Nx, Ny = self.Nx, self.Ny
+        R = self.R
 
+        x = np.linspace(0.0, 2 * R, Nx)
+        y = np.linspace(0.0, 2 * R, Ny)
+        
+        X, Y = np.meshgrid(x, y)
+        Z = mode.copy().reshape(Ny, Nx)
+        
+        r = (X - 0.004)**2 + (Y - 0.004)**2
+        Z[r > R*R] = 0
+
+        fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8,6))
+        surf = ax.plot_surface(X, Y, Z, cmap='jet')
+        ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', zlabel='$w$ (m)')
+        
+        cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
+        cbar.set_label("Deslocamento vertical $w$ (m)")
+        
         plt.show()
 
 def ex_02():
@@ -155,7 +186,7 @@ def ex_02():
         print()
 
     print("-"*124)
-
+    
     membrana = MembranaElastica(101, 101, R)
     membrana.plot_modes()
 
@@ -249,9 +280,9 @@ def ex_05():
     plt.show()
 
 def main():
-    # ex_02()
+    ex_02()
     # ex_04()
-    ex_05()
+    # ex_05()
 
 if __name__ == "__main__":
     main()
