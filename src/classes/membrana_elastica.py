@@ -101,11 +101,11 @@ class MembranaElastica:
         omegas *= scale
         freqs *= scale
 
-        modes /= np.sqrt(rho * e * h_sq)
+        # modes /= np.sqrt(rho * e * h_sq)
 
         return freqs, omegas, modes
 
-    def plot_modes(self, nmodes=10, flag_type='surface'):
+    def plot_modes(self, nmodes=10, flag_type='contour'):
         freq, _, modes = self.solve_modes(nmodes)
 
         for i in range(modes.shape[1]):
@@ -194,7 +194,7 @@ def ex_02():
     print("-"*124)
     
     membrana = MembranaElastica(101, R)
-    membrana.plot_modes()
+    membrana.plot_modes(10)
 
 def ex_04():
     R = 0.4e-2
@@ -278,8 +278,8 @@ def ex_05():
     plt.show()
 
 def main():
-    # ex_02()
-    ex_04()
+    ex_02()
+    # ex_04()
     # ex_05()
 
 if __name__ == "__main__":
