@@ -793,7 +793,11 @@ class PlacaTermica:
 
         return self.T
 
+
 def borda_padrao(Nx:int, Ny:int):
+
+
+    t = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, fonte_calor=fonte_calor_nominal)
     borda = []
 
     for j in range(Ny):
