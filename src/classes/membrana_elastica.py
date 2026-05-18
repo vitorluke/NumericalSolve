@@ -73,10 +73,13 @@ class MembranaElastica:
 
         return self.K, self.M
     
-    def solve_modes_adimensional(self, nmodes=10):
+    def solve_modes_adimensional(self, nmodes=None):
         assert(not(self.K is None or self.M is None))
 
-        Lam, modes = sp.sparse.linalg.eigsh(self.K, k=nmodes, M=self.M, which='SM', tol=1e-9)
+        if nmodes is not None:
+            Lam, modes = sp.sparse.linalg.eigsh(self.K, k=nmodes, M=self.M, which='SM', tol=1e-9)
+        else:
+            Lam, modes = sp.linalg.eigh(self.K.todense(), self.M.todense())
 
         idx = np.argsort(Lam)
         Lam = np.real(Lam[idx])
@@ -87,7 +90,7 @@ class MembranaElastica:
 
         return freqs, omegas, modes
     
-    def solve_modes(self, nmodes=10):
+    def solve_modes(self, nmodes=None):
         freqs, omegas, modes = self.solve_modes_adimensional(nmodes)
 
         R = self.R
@@ -100,8 +103,6 @@ class MembranaElastica:
 
         omegas *= scale
         freqs *= scale
-
-        # modes /= np.sqrt(rho * e * h_sq)
 
         return freqs, omegas, modes
 
@@ -117,7 +118,13 @@ class MembranaElastica:
             elif flag_type == 'surface':
                 self._plot_surface(mode, f, i+1)
 
-    def _plot_contour(self, mode, f, n):
+    def plot_solution(self, solution, f, flag_type='contour'):
+        if flag_type == 'contour':
+            self._plot_contour(solution, f)
+        elif flag_type == 'surface':
+            self._plot_surface(solution, f)
+
+    def _plot_contour(self, solution, f, n=None):
         N = self.N
         R = self.R
 
@@ -125,15 +132,16 @@ class MembranaElastica:
         y = np.linspace(0.0, 2 * R, N)
 
         X, Y = np.meshgrid(x, y)
-        Z = mode.copy().reshape(N, N)
+        Z = solution.reshape(N, N)
         
-        r = (X - R)**2 + (Y - R)**2
-        Z[r > R*R] = 0
-    
         fig, ax = plt.subplots(figsize=(8,4))
         
         ax.set_aspect('equal')
-        ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', title=f'Modo {n} (f={f:.2f}Hz)')
+
+        if n is not None:
+            ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', title=f'Modo {n} (f={f:.2f}Hz)')
+        else:
+            ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', title=f'f={f:.2f}Hz')
         
         im = ax.contourf(X, Y, Z, 20, cmap='jet')
         im2 = ax.contour(X, Y, Z, 20, linewidths=0.25, colors='k')
@@ -151,11 +159,8 @@ class MembranaElastica:
         y = np.linspace(0.0, 2 * R, N)
         
         X, Y = np.meshgrid(x, y)
-        Z = mode.copy().reshape(N, N)
+        Z = mode.reshape(N, N)
         
-        r = (X - R)**2 + (Y - R)**2
-        Z[r > R*R] = 0
-
         fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8,6))
         surf = ax.plot_surface(X, Y, Z, cmap='jet')
         ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', zlabel='$w$', title=f'Modo {n} (f={f:.2f}Hz)')
@@ -198,7 +203,7 @@ def ex_02():
 
 def ex_04():
     R = 0.4e-2
-    N = 101
+    N = 61
     membrana = MembranaElastica(N, R)
 
     x_hat = np.linspace(0, 2, N)
@@ -207,34 +212,24 @@ def ex_04():
     X, Y = np.meshgrid(x_hat, y_hat)
     Z_matrix = (X - 0.5)**2 + (Y - 0.5)**2
     
-    dist_r = np.sqrt((X - 1.0)**2 + (Y - 1.0)**2)
-    Z_matrix[dist_r > 1.0] = 0
-
     Z = Z_matrix.flatten()
 
-    freqs_hat, omegas_hat, modes = membrana.solve_modes_adimensional(nmodes=100)
+    _, omegas_hat, modes = membrana.solve_modes_adimensional()
     alphas = modes.T @ Z
 
-    omega_star_hat = 10
+    omega_star_hat = 100
     beta = 0.1
 
     denominador = np.sqrt((omegas_hat**2 - omega_star_hat**2)**2 + (beta * omega_star_hat)**2)
     ci = alphas / denominador
 
-    print(f"omega*^ = {omega_star_hat} rad/s e beta = {beta}")
-    print("-" * 54)
-    print(f"| {'Modo':<4} | {'Freq nat':<8} | {'alpha_i (Força)':<15} | {'c_i (Resposta)':<14} |")
-    print("-" * 54)
+    series = modes @ ci
 
-    for i in range(len(freqs_hat)):
-        print(f"| {i+1:<4} | {freqs_hat[i]:<8.4f} | {alphas[i]:<15.6e} | {ci[i]:<14.6e} |")
-    print("-" * 54)
-
-    return ci, alphas
+    membrana.plot_solution(series, 2 * np.pi / omega_star_hat)
     
 def ex_05():
     R = 0.4e-2
-    N = 71
+    N = 61
     membrana = MembranaElastica(N, R)
 
     x_hat = np.linspace(0, 2, N)
@@ -243,12 +238,9 @@ def ex_05():
     X, Y = np.meshgrid(x_hat, y_hat)
     Z_matrix = (X - 0.5)**2 + (Y - 0.5)**2
     
-    dist_r = np.sqrt((X - 1.0)**2 + (Y - 1.0)**2)
-    Z_matrix[dist_r > 1.0] = 0
-
     Z = Z_matrix.flatten()
 
-    _, omegas_hat, modes = membrana.solve_modes_adimensional(nmodes=800)
+    _, omegas_hat, modes = membrana.solve_modes_adimensional()
     alphas = modes.T @ Z
 
     beta_values = [0.01, 0.1, 1]
@@ -278,9 +270,9 @@ def ex_05():
     plt.show()
 
 def main():
-    ex_02()
+    # ex_02()
     # ex_04()
-    # ex_05()
+    ex_05()
 
 if __name__ == "__main__":
     main()
