@@ -1,3 +1,5 @@
+import numpy as np
+
 def trapezoid_method(f, l, r, n):
     delta_x = (r-l)/n
     prev = f(l)
@@ -9,6 +11,8 @@ def trapezoid_method(f, l, r, n):
         prev = height
     sum += f(r)
     return sum * delta_x / 2
+
+
 
 
 if __name__ == "__main__":

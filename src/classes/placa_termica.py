@@ -5,6 +5,7 @@ import matplotlib.animation as animation
 import matplotlib.colors as mcolors
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
+import scipy.interpolate as spi
 import time
 from numba import njit
 
@@ -792,6 +793,11 @@ class PlacaTermica:
             print("Número máximo de iterações atingido (Gauss-Seidel).")
 
         return self.T
+    
+    def temperature_at_coord(self, x,y, pts):
+        data = self.T.reshape(self.Ny, self.Nx).T
+        interpolator = spi.RegularGridInterpolator((x,y), data, method='linear')
+        return interpolator(pts)
 
 
 def borda_padrao(Nx:int, Ny:int):
