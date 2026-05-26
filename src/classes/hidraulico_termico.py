@@ -262,51 +262,145 @@ def ex_5_acoplamento():
     sistema.plotar_rede_termica(method='linear')
 
 
-if __name__ == '__main__':
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import time
+########################################################################
+# DISTÂNCIA ENTRE PONTO E SEGMENTO
+########################################################################
 
-    placa = PlacaTermica(
-        Lx=0.03,
-        Ly=0.015,
-        Nx=241,
-        Ny=121,
-        k=0.25,
-        R=0.0025,
-        fonte_calor=5e5
+def distancia_ponto_segmento(
+    self,
+    p,
+    a,
+    b
+):
+    ab = b - a
+
+    ap = p - a
+
+    t = np.dot(ap, ab) / np.dot(ab, ab)
+
+    t = np.clip(t, 0.0, 1.0)
+
+    proj = a + t * ab
+
+    return np.linalg.norm(p - proj)
+
+########################################################################
+# MAPA DE PROXIMIDADE
+########################################################################
+
+def criar_mapa_proximidade(
+    self,
+    dmax
+):
+    mapa = {}
+
+    Nx = self.placa.Nx
+    Ny = self.placa.Ny
+
+    for i in range(Nx):
+
+        for j in range(Ny):
+
+            kglobal = i + j * Nx
+
+            x = self.placa.X[i, j]
+            y = self.placa.Y[i, j]
+
+            p = np.array([x, y])
+
+            vizinhos = []
+
+            for edge_id, (n1, n2) in enumerate(
+                self.rede.conectividade
+            ):
+
+                a = self.rede.posicoes_nos[n1]
+                b = self.rede.posicoes_nos[n2]
+
+                d = self.distancia_ponto_segmento(
+                    p,
+                    a,
+                    b
+                )
+
+                ################################################################
+                # SE A DISTÂNCIA FOR MENOR QUE dmax
+                # O CANAL INFLUENCIA O PONTO
+                ################################################################
+
+                if d < dmax:
+
+                    vizinhos.append(
+                        (edge_id, d)
+                    )
+
+            mapa[kglobal] = vizinhos
+
+    return mapa
+
+########################################################################
+# CONDUTIVIDADE MODIFICADA
+########################################################################
+
+def k_interface(
+    self,
+    p,
+    mapa
+):
+    Nx = self.placa.Nx
+    Ny = self.placa.Ny
+
+    dx = self.placa.dx
+    dy = self.placa.dy
+
+    x, y = p
+
+    ####################################################################
+    # CONVERTE COORDENADA FÍSICA EM ÍNDICE DA MALHA
+    ####################################################################
+
+    i = int(round(x / dx))
+    j = int(round(y / dy))
+
+    i = np.clip(i, 0, Nx - 1)
+    j = np.clip(j, 0, Ny - 1)
+
+    kglobal = i + j * Nx
+
+    ####################################################################
+    # PEGA TODOS OS CANAIS PRÓXIMOS
+    ####################################################################
+
+    vizinhos = mapa[kglobal]
+
+    ####################################################################
+    # SOMA AS CONTRIBUIÇÕES DAS DISTÂNCIAS
+    ####################################################################
+
+    soma = 0.0
+
+    for edge_id, d in vizinhos:
+
+        soma += 1.0 / (1.0 + d)
+
+    ####################################################################
+    # CONDUTIVIDADE MODIFICADA
+    ####################################################################
+
+    return self.placa.k * (
+        1.0 + soma
     )
 
-    inicio = time.perf_counter()
-    placa.resolver_circulo(Tc=35.0, mode='sparse')
-    fim = time.perf_counter()
+########################################################################
+# INICIALIZA O MAPA DE PROXIMIDADE
+########################################################################
 
-    print(f"Tempo de resolução do sistema térmico: {fim - inicio:.6f} s")
-
-    interpolador = placa.criar_interpolador(method='cubic')
-
-    X, Y = np.meshgrid(
-        np.linspace(0.0, placa.Lx, 300),
-        np.linspace(0.0, placa.Ly, 150),
-        indexing='ij'
+def inicializar_proximidade(
+    self,
+    dmax
+):
+    self.mapa_proximidade = (
+        self.criar_mapa_proximidade(
+            dmax
+        )
     )
-
-    pts = np.column_stack([X.ravel(), Y.ravel()])
-    
-    T_campo = interpolador(pts).reshape(300, 150)
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    
-    contorno = ax.contourf(X, Y, T_campo, 40, cmap='jet')
-    ax.contour(X, Y, T_campo, 40, colors='black', linewidths=0.2)
-    
-    centro_x = placa.Lx / 2.0
-    centro_y = placa.Ly / 2.0
-    theta = np.linspace(0, 2 * np.pi, 100)
-    circ_x = centro_x + placa.R * np.cos(theta)
-    circ_y = centro_y + placa.R * np.sin(theta)
-    ax.plot(circ_x, circ_y, color='white', linestyle='--', linewidth=2)
-
-    ax.set_aspect('equal')
-    plt.colorbar(contorno, ax=ax)
-    plt.show()
