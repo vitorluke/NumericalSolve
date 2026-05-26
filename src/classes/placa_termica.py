@@ -9,7 +9,7 @@ import time
 from numba import njit
 
 class PlacaTermica:
-    def __init__(self, Lx:float, Ly:float, Nx: int, Ny: int, k, fonte_calor: float = 0.0):
+    def __init__(self, Lx:float, Ly:float, Nx: int, Ny: int, k, R:float, fonte_calor: float = 0.0):
         """Construtor da classe da placa térmica."""
         self.Lx = Lx
         self.Ly = Ly
@@ -24,6 +24,8 @@ class PlacaTermica:
         self.ds = self.hx * self.hy
 
         self.k = k
+
+        self.R = R
 
         self.fonte_calor = fonte_calor
 
@@ -210,11 +212,60 @@ class PlacaTermica:
 
         return self.T
     
-    def resolver(self, fronteira:list[(int, float)], use_sparse:bool=True):
-        if use_sparse:
-            return self._resolver_esparsa(fronteira)
-        else:
-            return self._resolver_densa(fronteira)
+    def resolver(self, fronteira:list[(int, float)], mode, tol, max_iter, omega):
+        match mode:
+            case 'sparse':
+                return self._resolver_esparsa(fronteira)
+            case 'dense':
+                return self._resolver_densa(fronteira)
+            case 'gauss-seidel':
+                return self.resolver_gauss_seidel(fronteira, tol, max_iter, omega)
+            case 'gauss-seidel r-b':
+                return self.resolver_gauss_seidel_rb(fronteira, tol, max_iter, omega)
+            case 'jacobi':
+                return self.resolver_jacobi(fronteira, tol, max_iter)
+
+    def resolver_circulo(self, Tc:float=30, mode='sparse', tol=1e-6, max_iter=1000, omega=1.85):
+        Nx, Ny = self.Nx, self.Ny
+        Lx, Ly = self.Lx, self.Ly
+        hx, hy = self.hx, self.hy
+
+        R = self.R
+
+        fronteira = []
+
+        for x in range(0, Nx):
+            for y in range(0, Ny):
+                if x == 0:
+                    fronteira.append((x + y * Nx, 10))
+                if x == Nx - 1:
+                    fronteira.append((x + y * Nx, 30))
+                if y == 0 or y == Ny - 1:
+                    fronteira.append((x + y * Nx, 10 + 20 * x / (Nx - 1)))
+            
+                dist_sq = (x * hx - Lx * 0.75)**2 + (y * hy - Ly * 0.5)**2
+
+                if dist_sq <= R*R:
+                    fronteira.append((x + y * Nx, Tc))
+
+        return self.resolver(fronteira, mode, tol, max_iter, omega)
+    
+    def resolver_borda(self, mode='sparse', tol=1e-6, max_iter=1000, omega=1.85):
+        Nx, Ny = self.Nx, self.Ny
+        Lx, Ly = self.Lx, self.Ly
+
+        fronteira = []
+
+        for x in range(0, Nx):
+            for y in range(0, Ny):
+                if x == 0:
+                    fronteira.append((x + y * Nx, 10))
+                if x == Nx - 1:
+                    fronteira.append((x + y * Nx, 30))
+                if y == 0 or y == Ny - 1:
+                    fronteira.append((x + y * Nx, 10 + 20 * x / (Nx - 1)))
+            
+        return self.resolver(fronteira, mode, tol, max_iter, omega)
 
     def temp_max(self):
         if self.T is None:
@@ -259,10 +310,23 @@ class PlacaTermica:
             plt.savefig(filename)
         plt.show()
 
-    def _malha_iterativa(self, fronteira):
+    def _malha_iterativa(self):
         tempo_inicio = time.time()
 
         T = np.zeros((self.Nx, self.Ny))
+
+        Nx, Ny = self.Nx, self.Ny
+
+        fronteira = []
+
+        for x in range(0, Nx):
+            for y in range(0, Ny):
+                if x == 0:
+                    fronteira.append((x + y * Nx, 10))
+                if x == Nx - 1:
+                    fronteira.append((x + y * Nx, 30))
+                if y == 0 or y == Ny - 1:
+                    fronteira.append((x + y * Nx, 10 + 20 * x / (Nx - 1)))
 
         for (ic, t) in fronteira:
             i = ic %  self.Nx
@@ -283,10 +347,10 @@ class PlacaTermica:
 
         return T
 
-    def gerar_historico_jacobi(self, fronteira:list[(int, float)], max_iter:int=1000, frame_skip:int=10):
+    def gerar_historico_jacobi(self, max_iter:int=1000, frame_skip:int=10):
         """Resolve a placa via Jacobi e retorna uma lista com o estado da malha a cada iteração."""
         # Inicializa a malha com zeros
-        T = self._malha_iterativa(fronteira=fronteira)
+        T = self._malha_iterativa()
         
         # Dedução do termo fonte baseado na sua montagem: 4Tc - Te - Tw - Tn - Ts = (h^2 * f) / k
         ke, kw, kn, ks, den = self._obter_vizinhos()
@@ -310,9 +374,9 @@ class PlacaTermica:
             
         return historico
 
-    def gerar_historico_gauss_seidel(self, borda:list[(int, float)], max_iter:int=1000, omega=1.85, frame_skip:int=10):
+    def gerar_historico_gauss_seidel(self, max_iter:int=1000, omega=1.85, frame_skip:int=10):
         """Resolve a placa via Gauss-Seidel e retorna uma lista com o estado da malha a cada iteração."""
-        T = self._malha_iterativa(borda)
+        T = self._malha_iterativa()
         
         ke, kw, kn, ks, den = self._obter_vizinhos()
         termo_fonte = self.ds * self.fonte_calor
@@ -426,32 +490,7 @@ class PlacaTermica:
             
         plt.show()
     
-    def _resolver_com_circulo(self, T_c: float, fronteira:list[(int, float)], raio: float, cx: float, cy: float):
-        """
-        Monta e resolve a placa aplicando uma temperatura T_c fixa 
-        em uma região circular definida por um raio e centro (cx, cy).
-        Retorna a matriz de temperaturas e o valor máximo encontrado.
-        """
-        
-        circulo = circulo_constante(
-            T  = T_c,
-            r  = raio,
-            cx = cx,
-            cy = cy,
-            Nx = self.Nx,
-            Ny = self.Ny,
-            hx = self.hx,
-            hy = self.hy
-        )
-
-        fronteira_total = fronteira + circulo
-
-        temp_1d = self.resolver(fronteira_total)
-        T_max_atual = np.max(temp_1d)
-        
-        return temp_1d.reshape((self.Ny, self.Nx)), T_max_atual
-
-    def descobrir_Tc_para_Tmax(self, T_alvo: float, fronteira:list[(int, float)], raio: float, cx: float, cy: float, tolerancia: float = 1e-4, max_iter: int = 50):
+    def descobrir_Tc_para_Tmax(self, T_alvo: float, tolerancia: float = 1e-4, max_iter: int = 50):
         """
         Usa o Método da Secante (um método iterativo simples) para encontrar 
         qual T_c faz com que T_max da placa seja exatamente T_alvo.
@@ -460,13 +499,13 @@ class PlacaTermica:
         
         # Chute 1
         Tc_0 = 0.0 
-        _, Tmax_0 = self._resolver_com_circulo(Tc_0, fronteira, raio, cx, cy)
-        erro_0 = Tmax_0 - T_alvo
+        self.resolver_circulo(Tc_0)
+        erro_0 = self.temp_max() - T_alvo
         
         # Chute 2
         Tc_1 = 100.0
-        _, Tmax_1 = self._resolver_com_circulo(Tc_1, fronteira, raio, cx, cy)
-        erro_1 = Tmax_1 - T_alvo
+        self.resolver_circulo(Tc_1)
+        erro_1 = self.temp_max() - T_alvo
 
         for it in range(max_iter):
             # Se a diferença entre os erros for zero, deu merda (divisão por zero)
@@ -478,7 +517,8 @@ class PlacaTermica:
             Tc_novo = Tc_1 - erro_1 * ((Tc_1 - Tc_0) / (erro_1 - erro_0))
             
             # Resolve a placa com o novo T_c
-            mapa_temp, Tmax_novo = self._resolver_com_circulo(Tc_novo, fronteira, raio, cx, cy)
+            self.resolver_circulo(Tc_novo)
+            Tmax_novo = self.temp_max()
             erro_novo = Tmax_novo - T_alvo
             
             print(f"Iteração {it+1}: Testando T_c = {Tc_novo:.4f} | T_max obtido = {Tmax_novo:.4f} | Erro = {abs(erro_novo):.6f}")
@@ -486,7 +526,6 @@ class PlacaTermica:
             # Verifica se já chegamos perto o suficiente do alvo
             if abs(erro_novo) < tolerancia:
                 print(f"\n>>> SUCESSO! T_c ideal encontrado: {Tc_novo:.4f}°C")
-                self.T = mapa_temp.flatten() # Salva para poder usar o plota_placa
                 return Tc_novo
             
             # Atualiza os valores para o próximo loop
@@ -793,75 +832,11 @@ class PlacaTermica:
 
         return self.T
 
-
-def borda_padrao(Nx:int, Ny:int):
-
-
-    t = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, fonte_calor=fonte_calor_nominal)
-    borda = []
-
-    for j in range(Ny):
-        left = (j * Nx, 10.0)
-        right = (Nx - 1 + j * Nx, 30.0)
-
-        borda.append(left)
-        borda.append(right)
-
-    for i in range(1, Nx - 1):
-        T = 10.0 + 20.0 * (i / (Nx - 1))
-
-        top = (i, T)
-        bottom = (i + (Ny - 1) * Nx, T)
-
-        borda.append(top)
-        borda.append(bottom)
-
-    return borda
-
-def borda_constante(Nx:int, Ny:int, T:float):
-    borda = []
-
-    for j in range(Ny):
-        left = (j * Nx, T)
-        right = (Nx - 1 + j * Nx, T)
-
-        borda.append(left)
-        borda.append(right)
-
-    for i in range(1, Nx - 1):
-        top = (i, T)
-        bottom = (i + (Ny - 1) * Nx, T)
-
-        borda.append(top)
-        borda.append(bottom)
-
-    return borda
-
-def circulo_constante(T:float, r:float, cx:float, cy:float, Nx:int, Ny:int, hx:float, hy:float):
-    circulo = []
-
-    r_squared = r ** 2
-
-    for i in range(Nx):
-        for j in range(Ny):
-            x = i * hx
-            y = j * hy
-
-            square_dist = (x - cx) ** 2 + (y - cy) ** 2
-
-            if (square_dist <= r_squared):
-                circulo.append((i + j * Nx, T))
-
-    return circulo
-
 # --- PARÂMETROS BASE SUGERIDOS ---
 Lx, Ly = 0.02, 0.01  # 2 cm x 1 cm em metros
 k_nominal = 0.2
 fonte_calor_nominal = 5e5
-
-raio_circulo = 0.002
-x_circulo = 0.75 * Lx
-y_circulo = 0.5 * Ly
+R=2e-3
 
 def exercicio_1():
     print("\n--- EXERCÍCIO 1 ---")
@@ -871,18 +846,17 @@ def exercicio_1():
     print("-" * 65)
     
     for Nx, Ny in malhas:
-        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, fonte_calor=fonte_calor_nominal)
-        temp_bordas = borda_padrao(Nx, Ny)
+        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, R=R, fonte_calor=fonte_calor_nominal)
         
         # Teste com Matriz Esparsa
-        placa.resolver(temp_bordas, use_sparse=True)
+        placa.resolver_borda()
         tempo_esparsa = placa.tempos_execucao['total']
         t_max = placa.temp_max()
         
         # Teste com Matriz Densa (CUIDADO com falta de memória para malhas grandes)
         tempo_densa = "N/A (Memória)"
         if Nx * Ny < 50000: # Proteção contra MemoryError
-            placa.resolver(temp_bordas, use_sparse=False)
+            placa.resolver_borda()
             tempo_densa = f"{placa.tempos_execucao['total']:.5f}"
         
         print(f"({Nx}, {Ny})".ljust(11), f" | {t_max:.2f}".ljust(13), f" | {tempo_esparsa:.5f}".ljust(20), f" | {tempo_densa}")
@@ -903,25 +877,11 @@ def exercicio_2(T_c:float=30.0):
             Nx,
             Ny,
             k=k_nominal,
+            R=R,
             fonte_calor=fonte_calor_nominal
         )
         
-        temp_bordas = borda_padrao(Nx, Ny)
-
-        circulo = circulo_constante(
-            T  = T_c,
-            r  = raio_circulo,
-            cx = x_circulo,
-            cy = y_circulo,
-            Nx = placa.Nx,
-            Ny = placa.Ny,
-            hx = placa.hx,
-            hy = placa.hy
-        )
-
-        fronteira_total = circulo + temp_bordas
-
-        placa.resolver(fronteira_total)
+        placa.resolver_circulo()
         
         print(f"Malha {Nx}x{Ny} -> T_max = {placa.temp_max():.2f}")
         if Nx == 161:
@@ -937,13 +897,11 @@ def exercicio_3():
     Nx = 161
     Ny = 81
 
-    placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_variavel, fonte_calor=fonte_calor_nominal)
-
-    temp_bordas = borda_padrao(Nx, Ny)
+    placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_variavel, R=R, fonte_calor=fonte_calor_nominal)
 
     # placa.resolver_gauss_seidel_rb(temp_bordas, tol=1e-12, max_iter=10000, omega=1.85)
     # placa.resolver_jacobi(temp_bordas, tol=1e-12, max_iter=100000)
-    placa.resolver(temp_bordas)
+    placa.resolver_borda()
     
     print(f"Temperatura Máxima com k variável: {placa.temp_max():.2f}")
     placa.plota_placa(title="Distribuição de temperaturas (°C) com k variável")
@@ -957,24 +915,9 @@ def exercicio_4():
     medias = []
     
     for Tc in temperaturas_Tc:
-        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, fonte_calor=fonte_calor_nominal)
+        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, R=R, fonte_calor=fonte_calor_nominal)
 
-        temp_bordas = borda_padrao(Nx, Ny)
-
-        circulo = circulo_constante(
-            T  = Tc,
-            r  = raio_circulo,
-            cx = x_circulo,
-            cy = y_circulo,
-            Nx = placa.Nx,
-            Ny = placa.Ny,
-            hx = placa.hx,
-            hy = placa.hy
-        )
-
-        fronteira_total = circulo + temp_bordas
-
-        placa.resolver(fronteira_total)
+        placa.resolver_circulo()
 
         maximas.append(placa.temp_max())
         medias.append(placa.temp_med())
@@ -1005,23 +948,9 @@ def exercicio_5():
     T_obs = []
     
     for c in casos:
-        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, fonte_calor=fonte_calor_nominal)
+        placa = PlacaTermica(Lx, Ly, Nx, Ny, k=k_nominal, R=R, fonte_calor=fonte_calor_nominal)
 
-        borda = borda_constante(Nx, Ny, c['TR'])
-        circulo = circulo_constante(
-            T  = c['TC'],
-            r  = raio_circulo,
-            cx = x_circulo,
-            cy = y_circulo,
-            Nx = placa.Nx,
-            Ny = placa.Ny,
-            hx = placa.hx,
-            hy = placa.hy
-        )
-
-        fronteira_total = borda + circulo
-        
-        placa.resolver(fronteira_total)
+        placa.resolver_circulo()
         T_obs.append(placa.T[ic_escolhido])
         
     # Monta sistema linear para encontrar a, b e c:
@@ -1042,27 +971,21 @@ def exercicio_5():
 
 def exercicio_3_extra(T_estrela:float=39.5):
     print("\n--- EXERCÍCIO 3 EXTRA ---")
-    placa = PlacaTermica(Nx=161, Ny=81, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
-    fronteira = borda_padrao(placa.Nx, placa.Ny)
+    placa = PlacaTermica(Nx=161, Ny=81, k=k_nominal, Lx=Lx, Ly=Ly, R=R, fonte_calor=fonte_calor_nominal)
 
-    Tc_ideal = placa.descobrir_Tc_para_Tmax(
-        T_alvo=T_estrela, 
-        fronteira=fronteira,
-        raio=raio_circulo, cx=x_circulo, cy=y_circulo
-    )
+    Tc_ideal = placa.descobrir_Tc_para_Tmax(T_alvo=T_estrela)
 
     return Tc_ideal
 
 def exercicio_2_extra():
     print("\n--- EXERCÍCIO 2 EXTRA ---")
-    placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, fonte_calor=fonte_calor_nominal)
-    borda = borda_padrao(placa.Nx, placa.Ny)
+    placa = PlacaTermica(Nx=41, Ny=21, k=k_nominal, Lx=Lx, Ly=Ly, R=R, fonte_calor=fonte_calor_nominal)
 
-    historico_jac = placa.gerar_historico_jacobi(borda, max_iter=1000, frame_skip=5)
-    historico_gs = placa.gerar_historico_gauss_seidel(borda, max_iter=1000, omega=1.0, frame_skip=5)
+    historico_jac = placa.gerar_historico_jacobi(max_iter=1000, frame_skip=5)
+    historico_gs = placa.gerar_historico_gauss_seidel( max_iter=1000, omega=1.0, frame_skip=5)
     placa.animar_comparacao(historico_jac, historico_gs, intervalo_ms=40)
     
-    placa.resolver(borda)
+    placa.resolver_borda()
 
     placa.plota_placa(flag_type='contour')
     placa.plota_placa(flag_type='surface')
@@ -1082,10 +1005,9 @@ def ex_1_extra_tolerancia():
         Nx=Nx,
         Ny=Ny,
         k=k_nominal,
+        R=R,
         fonte_calor=fonte_calor_nominal
     )
-
-    borda = borda_padrao(Nx, Ny)
 
     tolerancias = list(map(lambda n:10**(-n), range(2,14)))
 
@@ -1095,10 +1017,10 @@ def ex_1_extra_tolerancia():
     print("\nTolerância | Jacobi (s)   | Gauss-Seidel (s)")
 
     for tol in tolerancias:
-        placa.resolver_jacobi(borda, tol, max_iter=1000000)
+        placa.resolver_borda(mode='jacobi', tol=tol, max_iter=1000000)
         t1 = placa.tempos_execucao['total']
 
-        placa.resolver_gauss_seidel_rb(borda, tol, omega=1.85, max_iter=1000)
+        placa.resolver_borda(mode='gauss-seidel', tol=tol, omega=1.85, max_iter=1000)
         t2 = placa.tempos_execucao['total']
 
         tempo_jacobi.append(t1)
@@ -1144,15 +1066,14 @@ def ex_1_extra_malha():
             Nx=Nx,
             Ny=Ny,
             k=k_nominal,
+            R=R,
             fonte_calor=fonte_calor_nominal
         )
 
-        borda = borda_padrao(Nx, Ny)
-
-        placa.resolver_jacobi(borda, tol, max_iter=1000000)
+        placa.resolver_borda(mode='jacobi', tol=tol, max_iter=1000000)
         t1 = placa.tempos_execucao['total']
 
-        placa.resolver_gauss_seidel_rb(borda, tol, omega=1.85, max_iter=10000)
+        placa.resolver_borda(mode='gauss-seidel r-b', tol=tol, omega=1.85, max_iter=10000)
         t2 = placa.tempos_execucao['total']
 
         num_celulas.append(N_total)
@@ -1184,6 +1105,6 @@ if __name__ == "__main__":
     # exercicio_4()
     # exercicio_5()
 
-    exercicio_1_extra()
+    # exercicio_1_extra()
     # exercicio_2_extra()
-    # exercicio_3_extra(T_estrela=30.0)
+    exercicio_3_extra(T_estrela=39.5)

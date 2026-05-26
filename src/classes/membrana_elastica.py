@@ -2,6 +2,8 @@ import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
 
+big_number = 1e6
+
 class MembranaElastica:
     def __init__(self, N, R:float):
         self.N = N
@@ -36,7 +38,6 @@ class MembranaElastica:
         
         K = 1.0 / h_sq_hat * sp.sparse.diags([d3, d2, d1, d2, d3], [-N, -1, 0, 1, N], format='csr')
         
-        big_number = 1e7
         Iden = big_number * sp.sparse.identity(nunk, format='csr')
         
         for k in range(0,N):
@@ -141,7 +142,7 @@ class MembranaElastica:
         if n is not None:
             ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', title=f'Modo {n} (f={f:.2f}Hz)')
         else:
-            ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', title=f'f={f:.2f}Hz')
+            ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', title=f'f={f:.3f}Hz')
         
         im = ax.contourf(X, Y, Z, 20, cmap='jet')
         im2 = ax.contour(X, Y, Z, 20, linewidths=0.25, colors='k')
@@ -163,7 +164,7 @@ class MembranaElastica:
         
         fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8,6))
         surf = ax.plot_surface(X, Y, Z, cmap='jet')
-        ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', zlabel='$w$', title=f'Modo {n} (f={f:.2f}Hz)')
+        ax.set(xlabel='$x$ (m)', ylabel='$y$ (m)', zlabel='$w$', title=f'Modo {n} (f={f:.3f}Hz)')
         
         cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
         cbar.set_label("$w$")
@@ -203,7 +204,7 @@ def ex_02():
 
 def ex_04():
     R = 0.4e-2
-    N = 61
+    N = 101
     membrana = MembranaElastica(N, R)
 
     x_hat = np.linspace(0, 2, N)
@@ -211,10 +212,13 @@ def ex_04():
 
     X, Y = np.meshgrid(x_hat, y_hat)
     Z_matrix = (X - 0.5)**2 + (Y - 0.5)**2
-    
+
+    dist_sq = (X - 1.0)**2 + (Y - 1.0)**2
+    Z_matrix[dist_sq > 1.0] = 0.0
+
     Z = Z_matrix.flatten()
 
-    _, omegas_hat, modes = membrana.solve_modes_adimensional()
+    _, omegas_hat, modes = membrana.solve_modes_adimensional(5000)
     alphas = modes.T @ Z
 
     omega_star_hat = 100
@@ -229,7 +233,7 @@ def ex_04():
     
 def ex_05():
     R = 0.4e-2
-    N = 61
+    N = 101
     membrana = MembranaElastica(N, R)
 
     x_hat = np.linspace(0, 2, N)
@@ -237,6 +241,9 @@ def ex_05():
 
     X, Y = np.meshgrid(x_hat, y_hat)
     Z_matrix = (X - 0.5)**2 + (Y - 0.5)**2
+
+    dist_sq = (X - 1.0)**2 + (Y - 1.0)**2
+    Z_matrix[dist_sq > 1.0] = 0.0
     
     Z = Z_matrix.flatten()
 
@@ -271,8 +278,8 @@ def ex_05():
 
 def main():
     # ex_02()
-    # ex_04()
-    ex_05()
+    ex_04()
+    # ex_05()
 
 if __name__ == "__main__":
     main()
