@@ -1,0 +1,34 @@
+Método: trapezio
+Subdivisões: 1
+Tempo: 0.028910 s
+Temperatura média global: 35.572870
+
+Método: trapezio
+Subdivisões: 10
+Tempo: 0.127789 s
+Temperatura média global: 35.821280
+
+Método: trapezio
+Subdivisões: 100
+Tempo: 1.111651 s
+Temperatura média global: 35.823665
+
+Método: trapezio
+Subdivisões: 1000
+Tempo: 10.637078 s
+Temperatura média global: 35.823689
+
+Método: simpson
+Subdivisões: 10
+Tempo: 0.131258 s
+Temperatura média global: 35.823881
+
+Método: simpson
+Subdivisões: 100
+Tempo: 1.092373 s
+Temperatura média global: 35.823691
+
+Método: simpson
+Subdivisões: 1000
+Tempo: 10.870420 s
+Temperatura média global: 35.823689
