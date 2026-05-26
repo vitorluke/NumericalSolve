@@ -293,7 +293,7 @@ def criar_mapa_proximidade(
     self,
     dmax
 ):
-     mapa = {}
+    mapa = {}
 
     Nx = self.placa.Nx
     Ny = self.placa.Ny
