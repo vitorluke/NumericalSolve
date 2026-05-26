@@ -161,12 +161,181 @@ class HidraulicoTermico:
         self.rede.atualizar_condutancias(viscosidades)
         self.rede.resolver()
         return T_med
+    def distancia_ponto_segmento(
+     self,
+     p,
+    a,
+    b
+    ):
+        ab = b - a
+
+        ap = p - a
+
+        t = np.dot(ap, ab) / np.dot(ab, ab)
+
+        t = np.clip(t, 0.0, 1.0)
+
+        proj = a + t * ab
+
+        return np.linalg.norm(p - proj)
+
+        ########################################################################
+        # MAPA DE PROXIMIDADE
+        ########################################################################
+
+    def criar_mapa_proximidade(self, dmax):
+        mapa = {}
+        Nx = self.placa.Nx
+        Ny = self.placa.Ny
+        # Calculando o passo sem depender de atributos externos
+        dx = self.placa.Lx / (Nx - 1)
+        dy = self.placa.Ly / (Ny - 1)
+
+        for i in range(Nx):
+            for j in range(Ny):
+                kglobal = i + j * Nx
+                # CORREÇÃO: Calculando coordenadas manualmente
+                x = i * dx
+                y = j * dy
+                
+                p = np.array([x, y])
+                vizinhos = []
+
+                for edge_id, (n1, n2) in enumerate(self.rede.conectividade):
+                    a = self.rede.posicoes_nos[n1]
+                    b = self.rede.posicoes_nos[n2]
+                    d = self.distancia_ponto_segmento(p, a, b)
+                    if d < dmax:
+                        vizinhos.append((edge_id, d))
+                mapa[kglobal] = vizinhos
+        return mapa
+
+        ########################################################################
+        # CONDUTIVIDADE MODIFICADA
+        ########################################################################
+
+    def k_interface(self, p, mapa):
+        Nx = self.placa.Nx
+        Ny = self.placa.Ny
+
+        # CORREÇÃO: troquei self.placa.dx por self.placa.hx
+        # e self.placa.dy por self.placa.hy
+        dx = self.placa.hx
+        dy = self.placa.hy
+
+        x, y = p
+
+        # O restante do código permanece igual
+        i = int(round(x / dx))
+        j = int(round(y / dy))
+
+        i = np.clip(i, 0, Nx - 1)
+        j = np.clip(j, 0, Ny - 1)
+
+        kglobal = i + j * Nx
+        vizinhos = mapa[kglobal]
+
+        soma = 0.0
+        for edge_id, d in vizinhos:
+            soma += 1.0 / (1.0 + d)
+
+        return self.placa.k * (1.0 + soma)
+
+        ########################################################################
+        # INICIALIZA O MAPA DE PROXIMIDADE
+        ########################################################################
+
+    def inicializar_proximidade(
+        self,
+        dmax
+    ):
+        self.mapa_proximidade = (
+            self.criar_mapa_proximidade(
+                dmax
+            )
+        )
+    def exercicio_1_2(self):
+        dmax_list = [0.00025, 0.0005, 0.001]
+        malhas = [(61, 31), (121, 61), (241, 121)]
+        resultados = []
+
+        for Nx, Ny in malhas:
+            print(f"\n====================\nMALHA: {Nx} x {Ny}\n====================")
+            sistema = HidraulicoTermico(Nx, Ny)
+            dx = sistema.placa.Lx / (Nx - 1)
+            dy = sistema.placa.Ly / (Ny - 1)
+
+            for dmax in dmax_list:
+                print(f"\n--- dmax = {dmax} ---")
+                inicio = time.perf_counter()
+                mapa = sistema.criar_mapa_proximidade(dmax)
+                K = np.zeros((Nx, Ny))
+
+                for i in range(Nx):
+                    for j in range(Ny):
+                        # CORREÇÃO: Calculando coordenadas manualmente
+                        x = i * dx
+                        y = j * dy
+                        K[i, j] = sistema.k_interface(np.array([x, y]), mapa)
+
+                sistema.placa.k_map = K
+                sistema.placa.resolver_circulo(Tc=35, mode='sparse')
+                T = sistema.placa.T.reshape(Ny, Nx).T # Garantindo formato para o contourf
+                
+                # Plotagem ajustada para usar as coordenadas manuais
+                X_plot, Y_plot = np.meshgrid(np.linspace(0, sistema.placa.Lx, Nx), 
+                                             np.linspace(0, sistema.placa.Ly, Ny), indexing='ij')
+                
+                plt.figure(figsize=(6, 4))
+                plt.contourf(X_plot, Y_plot, T, 50, cmap='jet')
+                plt.colorbar(label="Temperatura (°C)")
+                plt.title(f"Temperatura - {Nx}x{Ny} - dmax={dmax}")
+                plt.show()
+
+                # =====================================================
+                # 4. PERFIS 1D
+                # =====================================================
+
+                # linha central vertical
+                mid_vertical = T[:, Ny // 2]
+
+                # linha central horizontal
+                mid_horizontal = T[Nx // 2, :]
+
+                plt.figure()
+                plt.plot(mid_vertical)
+                plt.title("Perfil vertical (centro)")
+                plt.xlabel("y")
+                plt.ylabel("T")
+                plt.show()
+
+                plt.figure()
+                plt.plot(mid_horizontal)
+                plt.title("Perfil horizontal (centro)")
+                plt.xlabel("x")
+                plt.ylabel("T")
+                plt.show()
+                Tmax = np.max(T)
+                tempo_total = time.perf_counter() - inicio
+
+                # =====================================================
+                # 5. ARMAZENAMENTO DOS RESULTADOS
+                # =====================================================
+                resultados.append({
+                    "malha": f"{Nx}x{Ny}",
+                    "dmax": dmax,
+                    "Tmax": Tmax,
+                    "tempo_total": tempo_total
+                })
+
+        return pd.DataFrame(resultados)
 
     def atualizar_condutancias_ex5(self, metodo='trapezio', n_sub=100):
         viscosidades_efetivas, _ = self.viscosidades_medias_arestas(metodo=metodo, n_sub=n_sub)
         self.rede.atualizar_condutancias(viscosidades_efetivas)
         self.rede.resolver()
         return viscosidades_efetivas
+    
 
 def ex_2_acoplamento():
     acoplamento = HidraulicoTermico(241, 121)
@@ -301,236 +470,22 @@ def ex_5_acoplamento():
     # DISTÂNCIA ENTRE PONTO E SEGMENTO
     ########################################################################
 
-def distancia_ponto_segmento(
-     self,
-     p,
-    a,
-    b
-):
-    ab = b - a
 
-    ap = p - a
 
-    t = np.dot(ap, ab) / np.dot(ab, ab)
-
-    t = np.clip(t, 0.0, 1.0)
-
-    proj = a + t * ab
-
-    return np.linalg.norm(p - proj)
-
-    ########################################################################
-    # MAPA DE PROXIMIDADE
-    ########################################################################
-
-def criar_mapa_proximidade(
-    self,
-    dmax
-):
-    mapa = {}
-
-    Nx = self.placa.Nx
-    Ny = self.placa.Ny
-
-    for i in range(Nx):
-
-        for j in range(Ny):
-
-            kglobal = i + j * Nx
-
-            x = self.placa.X[i, j]
-            y = self.placa.Y[i, j]
-
-            p = np.array([x, y])
-
-            vizinhos = []
-
-            for edge_id, (n1, n2) in enumerate(
-                self.rede.conectividade
-            ):
-
-                a = self.rede.posicoes_nos[n1]
-                b = self.rede.posicoes_nos[n2]
-
-                d = self.distancia_ponto_segmento(
-                    p,
-                    a,
-                    b
-                )
-
-                    ################################################################
-                    # SE A DISTÂNCIA FOR MENOR QUE dmax
-                    # O CANAL INFLUENCIA O PONTO
-                    ################################################################
-
-                if d < dmax:
-
-                    vizinhos.append(
-                        (edge_id, d)
-                    )
-
-            mapa[kglobal] = vizinhos
-
-    return mapa
-
-    ########################################################################
-    # CONDUTIVIDADE MODIFICADA
-    ########################################################################
-
-def k_interface(
-    self,
-    p,
-    mapa
-):
-    Nx = self.placa.Nx
-    Ny = self.placa.Ny
-
-    dx = self.placa.dx
-    dy = self.placa.dy
-
-    x, y = p
-
-        ####################################################################
-        # CONVERTE COORDENADA FÍSICA EM ÍNDICE DA MALHA
-        ####################################################################
-
-    i = int(round(x / dx))
-    j = int(round(y / dy))
-
-    i = np.clip(i, 0, Nx - 1)
-    j = np.clip(j, 0, Ny - 1)
-
-    kglobal = i + j * Nx
-
-        ####################################################################
-        # PEGA TODOS OS CANAIS PRÓXIMOS
-        ####################################################################
-
-    vizinhos = mapa[kglobal]
-
-        ####################################################################
-        # SOMA AS CONTRIBUIÇÕES DAS DISTÂNCIAS
-        ####################################################################
-
-    soma = 0.0
-
-    for edge_id, d in vizinhos:
-
-        soma += 1.0 / (1.0 + d)
-
-        ####################################################################
-        # CONDUTIVIDADE MODIFICADA
-        ####################################################################
-
-    return self.placa.k * (
-        1.0 + soma
-    )
-
-    ########################################################################
-    # INICIALIZA O MAPA DE PROXIMIDADE
-    ########################################################################
-
-def inicializar_proximidade(
-    self,
-    dmax
-):
-    self.mapa_proximidade = (
-        self.criar_mapa_proximidade(
-            dmax
-        )
-    )
-def exercicio_1_2(self):
-    dmax_list = [0.00025, 0.0005, 0.001]
-    malhas = [(61, 31), (121, 61), (241, 121)]
-
-    resultados = []
-
-    for Nx, Ny in malhas:
-
-        print(f"\n====================")
-        print(f"MALHA: {Nx} x {Ny}")
-        print(f"====================")
-
-        sistema = HidraulicoTermico(Nx, Ny)
-
-        for dmax in dmax_list:
-
-            print(f"\n--- dmax = {dmax} ---")
-
-            inicio = time.perf_counter()
-
-            # =====================================================
-            # 1. MAPA DE PROXIMIDADE + k(x,y)
-            # =====================================================
-            mapa = sistema.criar_mapa_proximidade(dmax)
-
-            K = np.zeros((sistema.placa.Nx, sistema.placa.Ny))
-
-            for i in range(sistema.placa.Nx):
-                for j in range(sistema.placa.Ny):
-
-                    x = sistema.placa.X[i, j]
-                    y = sistema.placa.Y[i, j]
-
-                    K[i, j] = sistema.k_interface(np.array([x, y]), mapa)
-
-            sistema.placa.k_map = K
-
-            # =====================================================
-            # 2. SOLUÇÃO DA TEMPERATURA
-            # =====================================================
-            sistema.placa.resolver_circulo(Tc=35, mode='sparse')
-
-            T = sistema.placa.T
-
-            tempo_total = time.perf_counter() - inicio
-
-            Tmax = np.max(T)
-
-            # =====================================================
-            # 3. MAPA DE CONTORNO
-            # =====================================================
-            plt.figure(figsize=(6, 4))
-            plt.contourf(sistema.placa.X, sistema.placa.Y, T, 50, cmap='jet')
-            plt.colorbar(label="Temperatura (°C)")
-            plt.title(f"Temperatura - {Nx}x{Ny} - dmax={dmax}")
-            plt.show()
-
-            # =====================================================
-            # 4. PERFIS 1D
-            # =====================================================
-
-            # linha central vertical
-            mid_vertical = T[:, Ny // 2]
-
-            # linha central horizontal
-            mid_horizontal = T[Nx // 2, :]
-
-            plt.figure()
-            plt.plot(mid_vertical)
-            plt.title("Perfil vertical (centro)")
-            plt.xlabel("y")
-            plt.ylabel("T")
-            plt.show()
-
-            plt.figure()
-            plt.plot(mid_horizontal)
-            plt.title("Perfil horizontal (centro)")
-            plt.xlabel("x")
-            plt.ylabel("T")
-            plt.show()
-
-            # =====================================================
-            # 5. ARMAZENAMENTO DOS RESULTADOS
-            # =====================================================
-            resultados.append({
-                "malha": f"{Nx}x{Ny}",
-                "dmax": dmax,
-                "Tmax": Tmax,
-                "tempo_total": tempo_total
-            })
-
-    return pd.DataFrame(resultados)
-
-
-
+def ex_1_especial_acoplamento():
+    print("\n--- INICIANDO ROTINA ESPECIAL: MAPA DE PROXIMIDADE E CONDUTIVIDADE ---")
+    
+    # Instanciamos uma malha de resolução baixa apenas como gatilho para acessar o método,
+    # já que o próprio exercicio_1_2 fará a instanciação das malhas de teste internamente.
+    sistema_gatilho = HidraulicoTermico(61, 31)
+    
+    print("Iniciando varredura de malhas e cálculo de distâncias (isso pode demorar devido aos laços não-vetorizados)...")
+    
+    # Executa a rotina que gera os gráficos de contorno e perfis 1D
+    df_resultados = sistema_gatilho.exercicio_1_2()
+    
+    print("\n=======================================================")
+    print("RESULTADOS GLOBAIS: TEMPERATURA MÁXIMA vs DISTÂNCIA (dmax)")
+    print("=======================================================")
+    print(df_resultados.to_string(index=False))
+    
