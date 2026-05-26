@@ -400,7 +400,7 @@ def ex_4_acoplamento():
             
     # Formatação limpa do DataFrame
     df = pd.DataFrame(resultados)
-    pd.options.display.float_format = '{:.6e}'.format
+    #pd.options.display.float_format = '{:.8e}'.format
     print("\n" + df.to_string(index=False))
 
     # Visualização final focada na malha mais refinada
