@@ -233,6 +233,40 @@ def ex_4_acoplamento():
     sistema_plot.plotar_rede_termica(method='linear')
 
 
+def ex_4_convergencia_grafica():
+    malha = (241, 121) # Fixando a malha mais refinada como referência
+    subdivisoes = [1, 2, 5, 10, 20, 50, 100]
+    
+    sistema = HidraulicoTermico(malha[0], malha[1])
+    
+    pot_pm = []
+    pot_trap = []
+    
+    print("Calculando convergência...")
+    for n in subdivisoes:
+        sistema.atualizar_condutancias_ex4(metodo='ponto_medio', n_sub=n)
+        pot_pm.append(sistema.rede.calcular_potencia())
+        
+        sistema.atualizar_condutancias_ex4(metodo='trapezio', n_sub=n)
+        pot_trap.append(sistema.rede.calcular_potencia())
+        
+    # Plotagem do Gráfico de Convergência
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    ax.plot(subdivisoes, pot_pm, marker='o', linestyle='-', color='blue', label='Ponto Médio', linewidth=2)
+    ax.plot(subdivisoes, pot_trap, marker='s', linestyle='--', color='red', label='Trapézio', linewidth=2)
+    
+    ax.set_xscale('log')
+    ax.set_xlabel('Número de Subdivisões por Aresta (escala log)')
+    ax.set_ylabel('Potência Total Dissipada (W)')
+    ax.set_title('Convergência da Potência Dissipada no Gêmeo Digital')
+    
+    # Adicionando grid para facilitar a leitura da estabilização
+    ax.grid(True, which="both", ls="--", linewidth=0.5)
+    ax.legend()
+    
+    plt.tight_layout()
+
 
 def ex_5_acoplamento():
     print("\n--- EXERCÍCIO 5: COMPARAÇÃO DE MODELAGEM DA VISCOSIDADE ---")

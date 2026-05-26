@@ -6,7 +6,7 @@ from src.graph_benchmarking.benchmark import *
 import src.classes.placa_termica as pt
 from collections.abc import Mapping
 
-from src.classes.hidraulico_termico import HidraulicoTermico, ex_2_acoplamento, ex_3_acoplamento, ex_4_acoplamento, ex_5_acoplamento
+from src.classes.hidraulico_termico import HidraulicoTermico, ex_2_acoplamento, ex_3_acoplamento, ex_4_acoplamento, ex_5_acoplamento, ex_4_convergencia_grafica
 
 """
 def main():
@@ -160,7 +160,8 @@ def main():
 def main():
     #ex_2_acoplamento()
     #ex_3_acoplamento()
-    ex_4_acoplamento()
+    #ex_4_acoplamento()
+    ex_4_convergencia_grafica()
     #ex_5_acoplamento()
 
 
