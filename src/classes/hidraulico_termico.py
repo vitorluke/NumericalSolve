@@ -7,12 +7,12 @@ from src.classes.rede_hidraulica import RedeHidraulica
 from src.classes.placa_termica import PlacaTermica
 
 class HidraulicoTermico:
-    def __init__(self):
+    def __init__(self, Nx, Ny):
         self.placa = PlacaTermica(
             Lx=0.03,
             Ly=0.015,
-            Nx=241,
-            Ny=121,
+            Nx=Nx,
+            Ny=Ny,
             k=0.25,
             R=0.0025,
             fonte_calor=5e5
@@ -309,23 +309,43 @@ class HidraulicoTermico:
         plt.show()
 
 def ex_2_acoplamento():
-    acoplamento = HidraulicoTermico()
+    acoplamento = HidraulicoTermico(241, 121)
 
     acoplamento.mapa_contorno_grade_secundaria(
-        241,
-        121,
+        101,
+        51,
         method='linear'
     )
 
     acoplamento.mapa_contorno_grade_secundaria(
-        241,
-        121,
+        101,
+        51,
         method='nearest'
     )
 
     acoplamento.mapa_contorno_grade_secundaria(
-        241,
-        121,
+        101,
+        51,
+        method='cubic'
+    )
+
+    acoplamento = HidraulicoTermico(61, 31)
+
+    acoplamento.mapa_contorno_grade_secundaria(
+        41,
+        21,
+        method='linear'
+    )
+
+    acoplamento.mapa_contorno_grade_secundaria(
+        41,
+        21,
+        method='nearest'
+    )
+
+    acoplamento.mapa_contorno_grade_secundaria(
+        41,
+        21,
         method='cubic'
     )
 
@@ -334,7 +354,7 @@ def ex_2_acoplamento():
     )
 
 def ex_3_acoplamento():
-    acoplamento = HidraulicoTermico()
+    acoplamento = HidraulicoTermico(241, 121)
 
     configs = [
         ('trapezio', 1),

@@ -238,9 +238,9 @@ class PlacaTermica:
             for y in range(0, Ny):
                 if x == 0:
                     fronteira.append((x + y * Nx, 10))
-                if x == Nx - 1:
+                elif x == Nx - 1:
                     fronteira.append((x + y * Nx, 30))
-                if y == 0 or y == Ny - 1:
+                elif y == 0 or y == Ny - 1:
                     fronteira.append((x + y * Nx, 10 + 20 * x / (Nx - 1)))
             
                 dist_sq = (x * hx - Lx * 0.75)**2 + (y * hy - Ly * 0.5)**2
