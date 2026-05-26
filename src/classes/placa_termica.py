@@ -7,7 +7,6 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 import scipy.interpolate as spi
 import time
-from numba import njit
 
 class PlacaTermica:
     def __init__(self, Lx:float, Ly:float, Nx: int, Ny: int, k, R:float, fonte_calor: float = 0.0):
@@ -833,10 +832,23 @@ class PlacaTermica:
 
         return self.T
     
-    def temperature_at_coord(self, x,y, pts):
+    def criar_interpolador(self, method='linear'):
+        x = np.linspace(0.0, self.Lx, self.Nx)
+        y = np.linspace(0.0, self.Ly, self.Ny)
+
         data = self.T.reshape(self.Ny, self.Nx).T
-        interpolator = spi.RegularGridInterpolator((x,y), data, method='linear')
-        return interpolator(pts)
+
+        return spi.RegularGridInterpolator(
+            (x, y),
+            data,
+            method=method,
+            bounds_error=False,
+            fill_value=None
+        )
+    
+    def temperatura_em(self, pts, method='linear'):
+        interpolador = self.criar_interpolador(method)
+        return interpolador(pts)
 
 # --- PARÂMETROS BASE SUGERIDOS ---
 Lx, Ly = 0.02, 0.01  # 2 cm x 1 cm em metros

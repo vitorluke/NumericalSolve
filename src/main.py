@@ -1,11 +1,14 @@
 from src.classes.rede_hidraulica import RedeHidraulica
+from src.classes.placa_termica import PlacaTermica
 from src.graphs_utils.utils import gerar_grafo_aleatorio, plotar_grafo_alternativo
 from src.graphs_utils.utils import gera_rede
 from src.graph_benchmarking.benchmark import *
 import src.classes.placa_termica as pt
 from collections.abc import Mapping
 
+from src.classes.hidraulico_termico import HidraulicoTermico, ex_2_acoplamento, ex_3_acoplamento
 
+"""
 def main():
     str = ""
     pressoes_impostas = {2: 0.0}
@@ -152,6 +155,11 @@ def main():
     })
 
     
+    """
+
+def main():
+    ex_2_acoplamento()
+    ex_3_acoplamento()
 
 if __name__ == "__main__":
     main()
