@@ -304,14 +304,14 @@ class HidraulicoTermico:
 
                 plt.figure()
                 plt.plot(mid_vertical)
-                plt.title("Perfil vertical (centro)")
+                plt.title(f"Perfil horizontal (centro) {Nx}x{Ny} - dmax={dmax}")
                 plt.xlabel("y")
                 plt.ylabel("T")
                 plt.show()
 
                 plt.figure()
                 plt.plot(mid_horizontal)
-                plt.title("Perfil horizontal (centro)")
+                plt.title(f"Perfil vertical (centro) {Nx}x{Ny} - dmax={dmax}")
                 plt.xlabel("x")
                 plt.ylabel("T")
                 plt.show()
