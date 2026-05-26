@@ -160,10 +160,9 @@ def main():
 def main():
     #ex_2_acoplamento()
     #ex_3_acoplamento()
-    #ex_4_acoplamento()
-    #ex_4_convergencia_grafica()
+    ex_4_acoplamento()
     #ex_5_acoplamento()
-    ex_1_especial_acoplamento()
+    #ex_1_especial_acoplamento()
 
 
 if __name__ == "__main__":

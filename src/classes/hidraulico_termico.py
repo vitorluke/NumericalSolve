@@ -368,38 +368,45 @@ def ex_3_acoplamento():
     acoplamento.plotar_dados_arestas(Tmed_plot, label='Temperatura Média (°C)')
 
 def ex_4_acoplamento():
-    print("\n--- EXERCÍCIO 4: ANÁLISE DE CONVERGÊNCIA (MALHAS E QUADRATURA) ---")
+    print("\n--- EXERCÍCIO 4: ANÁLISE DE CONVERGÊNCIA ---")
     malhas = [(61, 31), (121, 61), (241, 121)]
     configuracoes = [('ponto_medio', 10), ('trapezio', 10), ('trapezio', 100)]
     
     resultados = []
 
     for Nx, Ny in malhas:
+        print(f"Processando malha: {Nx}x{Ny}...")
         sistema = HidraulicoTermico(Nx, Ny)
+        
+        # Warm-up: executa uma vez sem medir para forçar alocações e aquecer o cache
+        sistema.atualizar_condutancias_ex4(metodo='trapezio', n_sub=10)
+        
         for metodo, n_sub in configuracoes:
-            inicio = time.perf_counter()
-            T_med = sistema.atualizar_condutancias_ex4(metodo=metodo, n_sub=n_sub)
-            fim = time.perf_counter()
-            
-            P_max = sistema.rede.pressao.max()
-            Pot = sistema.rede.calcular_potencia()
+            # Medição com média de 5 execuções para eliminar ruído do OS
+            tempos = []
+            for _ in range(5):
+                inicio = time.perf_counter()
+                sistema.atualizar_condutancias_ex4(metodo=metodo, n_sub=n_sub)
+                tempos.append(time.perf_counter() - inicio)
             
             resultados.append({
                 'Malha': f'{Nx}x{Ny}',
                 'Método': metodo,
                 'Subdivisões': n_sub,
-                'P_max (Pa)': P_max,
-                'Potência (W)': Pot,
-                'Tempo (s)': fim - inicio
+                'P_max (Pa)': sistema.rede.pressao.max(),
+                'Potência (W)': sistema.rede.calcular_potencia(),
+                'Tempo_Medio (s)': np.mean(tempos)
             })
             
+    # Formatação limpa do DataFrame
     df = pd.DataFrame(resultados)
-    print(df.to_string(index=False))
+    pd.options.display.float_format = '{:.6e}'.format
+    print("\n" + df.to_string(index=False))
 
-    sistema_plot = HidraulicoTermico(241, 121)
-    T_med_plot = sistema_plot.atualizar_condutancias_ex4(metodo='trapezio', n_sub=100)
-    sistema_plot.plotar_dados_arestas(T_med_plot, label='Temperatura Média (°C)')
-    sistema_plot.plotar_rede_termica(method='linear')
+    # Visualização final focada na malha mais refinada
+    print("\nGerando visualização da convergência...")
+    sistema.plotar_dados_arestas(sistema.temperaturas_medias_arestas(metodo='trapezio', n_sub=100)[0], label='Temperatura Média (°C)')
+    sistema.plotar_rede_termica(method='linear')
 
 
 def ex_4_convergencia_grafica():
