@@ -439,6 +439,98 @@ def inicializar_proximidade(
             dmax
         )
     )
+def exercicio_1_2(self):
+    dmax_list = [0.00025, 0.0005, 0.001]
+    malhas = [(61, 31), (121, 61), (241, 121)]
+
+    resultados = []
+
+    for Nx, Ny in malhas:
+
+        print(f"\n====================")
+        print(f"MALHA: {Nx} x {Ny}")
+        print(f"====================")
+
+        sistema = HidraulicoTermico(Nx, Ny)
+
+        for dmax in dmax_list:
+
+            print(f"\n--- dmax = {dmax} ---")
+
+            inicio = time.perf_counter()
+
+            # =====================================================
+            # 1. MAPA DE PROXIMIDADE + k(x,y)
+            # =====================================================
+            mapa = sistema.criar_mapa_proximidade(dmax)
+
+            K = np.zeros((sistema.placa.Nx, sistema.placa.Ny))
+
+            for i in range(sistema.placa.Nx):
+                for j in range(sistema.placa.Ny):
+
+                    x = sistema.placa.X[i, j]
+                    y = sistema.placa.Y[i, j]
+
+                    K[i, j] = sistema.k_interface(np.array([x, y]), mapa)
+
+            sistema.placa.k_map = K
+
+            # =====================================================
+            # 2. SOLUÇÃO DA TEMPERATURA
+            # =====================================================
+            sistema.placa.resolver_circulo(Tc=35, mode='sparse')
+
+            T = sistema.placa.T
+
+            tempo_total = time.perf_counter() - inicio
+
+            Tmax = np.max(T)
+
+            # =====================================================
+            # 3. MAPA DE CONTORNO
+            # =====================================================
+            plt.figure(figsize=(6, 4))
+            plt.contourf(sistema.placa.X, sistema.placa.Y, T, 50, cmap='jet')
+            plt.colorbar(label="Temperatura (°C)")
+            plt.title(f"Temperatura - {Nx}x{Ny} - dmax={dmax}")
+            plt.show()
+
+            # =====================================================
+            # 4. PERFIS 1D
+            # =====================================================
+
+            # linha central vertical
+            mid_vertical = T[:, Ny // 2]
+
+            # linha central horizontal
+            mid_horizontal = T[Nx // 2, :]
+
+            plt.figure()
+            plt.plot(mid_vertical)
+            plt.title("Perfil vertical (centro)")
+            plt.xlabel("y")
+            plt.ylabel("T")
+            plt.show()
+
+            plt.figure()
+            plt.plot(mid_horizontal)
+            plt.title("Perfil horizontal (centro)")
+            plt.xlabel("x")
+            plt.ylabel("T")
+            plt.show()
+
+            # =====================================================
+            # 5. ARMAZENAMENTO DOS RESULTADOS
+            # =====================================================
+            resultados.append({
+                "malha": f"{Nx}x{Ny}",
+                "dmax": dmax,
+                "Tmax": Tmax,
+                "tempo_total": tempo_total
+            })
+
+    return pd.DataFrame(resultados)
 
 
 
