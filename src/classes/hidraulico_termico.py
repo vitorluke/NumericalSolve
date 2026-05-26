@@ -232,6 +232,149 @@ def ex_4_acoplamento():
     sistema_plot.plotar_dados_arestas(T_med_plot, label='Temperatura Média (°C)')
     sistema_plot.plotar_rede_termica(method='linear')
 
+    ########################################################################
+    # DISTÂNCIA ENTRE PONTO E SEGMENTO
+    ########################################################################
+
+    def distancia_ponto_segmento(
+        self,
+        p,
+        a,
+        b
+    ):
+        ab = b - a
+
+        ap = p - a
+
+        t = np.dot(ap, ab) / np.dot(ab, ab)
+
+        t = np.clip(t, 0.0, 1.0)
+
+        proj = a + t * ab
+
+        return np.linalg.norm(p - proj)
+
+    ########################################################################
+    # MAPA DE PROXIMIDADE
+    ########################################################################
+
+    def criar_mapa_proximidade(
+        self,
+        dmax
+    ):
+        mapa = {}
+
+        Nx = self.placa.Nx
+        Ny = self.placa.Ny
+
+        for i in range(Nx):
+
+            for j in range(Ny):
+
+                kglobal = i + j * Nx
+
+                x = self.placa.X[i, j]
+                y = self.placa.Y[i, j]
+
+                p = np.array([x, y])
+
+                vizinhos = []
+
+                for edge_id, (n1, n2) in enumerate(
+                    self.rede.conectividade
+                ):
+
+                    a = self.rede.posicoes_nos[n1]
+                    b = self.rede.posicoes_nos[n2]
+
+                    d = self.distancia_ponto_segmento(
+                        p,
+                        a,
+                        b
+                    )
+
+                    ################################################################
+                    # SE A DISTÂNCIA FOR MENOR QUE dmax
+                    # O CANAL INFLUENCIA O PONTO
+                    ################################################################
+
+                    if d < dmax:
+
+                        vizinhos.append(
+                            (edge_id, d)
+                        )
+
+                mapa[kglobal] = vizinhos
+
+        return mapa
+
+    ########################################################################
+    # CONDUTIVIDADE MODIFICADA
+    ########################################################################
+
+    def k_interface(
+        self,
+        p,
+        mapa
+    ):
+        Nx = self.placa.Nx
+        Ny = self.placa.Ny
+
+        dx = self.placa.dx
+        dy = self.placa.dy
+
+        x, y = p
+
+        ####################################################################
+        # CONVERTE COORDENADA FÍSICA EM ÍNDICE DA MALHA
+        ####################################################################
+
+        i = int(round(x / dx))
+        j = int(round(y / dy))
+
+        i = np.clip(i, 0, Nx - 1)
+        j = np.clip(j, 0, Ny - 1)
+
+        kglobal = i + j * Nx
+
+        ####################################################################
+        # PEGA TODOS OS CANAIS PRÓXIMOS
+        ####################################################################
+
+        vizinhos = mapa[kglobal]
+
+        ####################################################################
+        # SOMA AS CONTRIBUIÇÕES DAS DISTÂNCIAS
+        ####################################################################
+
+        soma = 0.0
+
+        for edge_id, d in vizinhos:
+
+            soma += 1.0 / (1.0 + d)
+
+        ####################################################################
+        # CONDUTIVIDADE MODIFICADA
+        ####################################################################
+
+        return self.placa.k * (
+            1.0 + soma
+        )
+
+    ########################################################################
+    # INICIALIZA O MAPA DE PROXIMIDADE
+    ########################################################################
+
+    def inicializar_proximidade(
+        self,
+        dmax
+    ):
+        self.mapa_proximidade = (
+            self.criar_mapa_proximidade(
+                dmax
+            )
+        )
+
 def ex_5_acoplamento():
     print("\n--- EXERCÍCIO 5: COMPARAÇÃO DE MODELAGEM DA VISCOSIDADE ---")
     sistema = HidraulicoTermico(241, 121) 
@@ -262,145 +405,4 @@ def ex_5_acoplamento():
     sistema.plotar_rede_termica(method='linear')
 
 
-########################################################################
-# DISTÂNCIA ENTRE PONTO E SEGMENTO
-########################################################################
 
-def distancia_ponto_segmento(
-    self,
-    p,
-    a,
-    b
-):
-    ab = b - a
-
-    ap = p - a
-
-    t = np.dot(ap, ab) / np.dot(ab, ab)
-
-    t = np.clip(t, 0.0, 1.0)
-
-    proj = a + t * ab
-
-    return np.linalg.norm(p - proj)
-
-########################################################################
-# MAPA DE PROXIMIDADE
-########################################################################
-
-def criar_mapa_proximidade(
-    self,
-    dmax
-):
-    mapa = {}
-
-    Nx = self.placa.Nx
-    Ny = self.placa.Ny
-
-    for i in range(Nx):
-
-        for j in range(Ny):
-
-            kglobal = i + j * Nx
-
-            x = self.placa.X[i, j]
-            y = self.placa.Y[i, j]
-
-            p = np.array([x, y])
-
-            vizinhos = []
-
-            for edge_id, (n1, n2) in enumerate(
-                self.rede.conectividade
-            ):
-
-                a = self.rede.posicoes_nos[n1]
-                b = self.rede.posicoes_nos[n2]
-
-                d = self.distancia_ponto_segmento(
-                    p,
-                    a,
-                    b
-                )
-
-                ################################################################
-                # SE A DISTÂNCIA FOR MENOR QUE dmax
-                # O CANAL INFLUENCIA O PONTO
-                ################################################################
-
-                if d < dmax:
-
-                    vizinhos.append(
-                        (edge_id, d)
-                    )
-
-            mapa[kglobal] = vizinhos
-
-    return mapa
-
-########################################################################
-# CONDUTIVIDADE MODIFICADA
-########################################################################
-
-def k_interface(
-    self,
-    p,
-    mapa
-):
-    Nx = self.placa.Nx
-    Ny = self.placa.Ny
-
-    dx = self.placa.dx
-    dy = self.placa.dy
-
-    x, y = p
-
-    ####################################################################
-    # CONVERTE COORDENADA FÍSICA EM ÍNDICE DA MALHA
-    ####################################################################
-
-    i = int(round(x / dx))
-    j = int(round(y / dy))
-
-    i = np.clip(i, 0, Nx - 1)
-    j = np.clip(j, 0, Ny - 1)
-
-    kglobal = i + j * Nx
-
-    ####################################################################
-    # PEGA TODOS OS CANAIS PRÓXIMOS
-    ####################################################################
-
-    vizinhos = mapa[kglobal]
-
-    ####################################################################
-    # SOMA AS CONTRIBUIÇÕES DAS DISTÂNCIAS
-    ####################################################################
-
-    soma = 0.0
-
-    for edge_id, d in vizinhos:
-
-        soma += 1.0 / (1.0 + d)
-
-    ####################################################################
-    # CONDUTIVIDADE MODIFICADA
-    ####################################################################
-
-    return self.placa.k * (
-        1.0 + soma
-    )
-
-########################################################################
-# INICIALIZA O MAPA DE PROXIMIDADE
-########################################################################
-
-def inicializar_proximidade(
-    self,
-    dmax
-):
-    self.mapa_proximidade = (
-        self.criar_mapa_proximidade(
-            dmax
-        )
-    )
