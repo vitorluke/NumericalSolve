@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-
 import time
+import pandas as pd
 
 from src.classes.rede_hidraulica import RedeHidraulica
 from src.classes.placa_termica import PlacaTermica
@@ -17,200 +17,113 @@ class HidraulicoTermico:
             R=0.0025,
             fonte_calor=5e5
         )
+        self.placa.resolver_circulo(Tc=35, mode='sparse')
+        self.rede = RedeHidraulica(levels=3)
 
-        self.placa.resolver_circulo(
-            Tc=35,
-            mode='sparse'
-        )
+    def calcular_viscosidade(self, T):
+        return 0.001791 / (1.0 + 0.03368 * T + 0.000221 * (T**2))
 
-        self.rede = RedeHidraulica(
-            levels=3
-        )
-
-    def temperatura_aresta(
-        self,
-        i,
-        j,
-        interpolador,
-        metodo='trapezio',
-        n_sub=1
-    ):
-        p0 = self.rede.posicoes_nos[i]
-        p1 = self.rede.posicoes_nos[j]
-
-        def ponto(t):
-            return (1 - t) * p0 + t * p1
-
+    def integrar_linha(self, p0, p1, func, metodo='trapezio', n_sub=100):
+        if metodo == 'monte_carlo':
+            ts = np.random.uniform(0.0, 1.0, n_sub)
+            pts = (1.0 - ts[:, None]) * p0 + ts[:, None] * p1
+            valores = func(pts)
+            return np.mean(valores)
+        
         if metodo == 'ponto_medio':
-            t = 0.5
-            return interpolador([ponto(t)])[0]
-
-        ts = np.linspace(0.0, 1.0, n_sub + 1)
-
-        valores = np.array([
-            interpolador([ponto(t)])[0]
-            for t in ts
-        ])
-
-        h = 1.0 / n_sub
+            ts = np.linspace(0.5 / n_sub, 1.0 - 0.5 / n_sub, n_sub)
+            pts = (1.0 - ts[:, None]) * p0 + ts[:, None] * p1
+            valores = func(pts)
+            return np.mean(valores)
 
         if metodo == 'trapezio':
-            integral = (
-                h *
-                (
-                    0.5 * valores[0]
-                    + np.sum(valores[1:-1])
-                    + 0.5 * valores[-1]
-                )
-            )
+            ts = np.linspace(0.0, 1.0, n_sub + 1)
+            pts = (1.0 - ts[:, None]) * p0 + ts[:, None] * p1
+            valores = func(pts)
+            return (np.sum(valores) - 0.5 * (valores[0] + valores[-1])) / n_sub
 
-            return integral
+        raise ValueError()
 
-        elif metodo == 'simpson':
-            if n_sub % 2 == 1:
-                n_sub += 1
+    def temperatura_media_aresta(self, i, j, interpolador, metodo='trapezio', n_sub=100):
+        p0 = self.rede.posicoes_nos[i]
+        p1 = self.rede.posicoes_nos[j]
+        
+        def func_T(pts):
+            return interpolador(pts).ravel()
+            
+        return self.integrar_linha(p0, p1, func_T, metodo, n_sub)
 
-                ts = np.linspace(0.0, 1.0, n_sub + 1)
+    def viscosidade_efetiva_aresta(self, i, j, interpolador, metodo='trapezio', n_sub=100):
+        p0 = self.rede.posicoes_nos[i]
+        p1 = self.rede.posicoes_nos[j]
+        
+        def func_mu(pts):
+            T_vals = interpolador(pts).ravel()
+            return self.calcular_viscosidade(T_vals)
+            
+        return self.integrar_linha(p0, p1, func_mu, metodo, n_sub)
 
-                valores = np.array([
-                    interpolador([ponto(t)])[0]
-                    for t in ts
-                ])
-
-                h = 1.0 / n_sub
-
-            integral = (
-                h / 3.0 *
-                (
-                    valores[0]
-                    + valores[-1]
-                    + 4 * np.sum(valores[1:-1:2])
-                    + 2 * np.sum(valores[2:-2:2])
-                )
-            )
-
-            return integral
-
-        raise ValueError("Método inválido")
-    
-    def temperaturas_medias_arestas(
-        self,
-        metodo='trapezio',
-        n_sub=1,
-        interp='linear'
-    ):
+    def temperaturas_medias_arestas(self, metodo='trapezio', n_sub=100, interp='linear'):
         interpolador = self.placa.criar_interpolador(interp)
-
         temperaturas = []
-
         inicio = time.perf_counter()
 
-        for (i, j) in self.rede.conectividade:
-            T_med = self.temperatura_aresta(
-                i,
-                j,
-                interpolador,
-                metodo=metodo,
-                n_sub=n_sub
-            )
-
+        for i, j in self.rede.conectividade:
+            T_med = self.temperatura_media_aresta(i, j, interpolador, metodo, n_sub)
             temperaturas.append(T_med)
 
         fim = time.perf_counter()
+        return np.array(temperaturas), fim - inicio
 
-        temperaturas = np.array(temperaturas)
+    def viscosidades_medias_arestas(self, metodo='trapezio', n_sub=100, interp='linear'):
+        interpolador = self.placa.criar_interpolador(interp)
+        viscosidades = []
+        inicio = time.perf_counter()
 
-        tempo = fim - inicio
+        for i, j in self.rede.conectividade:
+            mu_efetiva = self.viscosidade_efetiva_aresta(i, j, interpolador, metodo, n_sub)
+            viscosidades.append(mu_efetiva)
 
-        return temperaturas, tempo
-    
-    def plotar_temperatura_arestas(
-        self,
-        temperaturas
-    ):
+        fim = time.perf_counter()
+        return np.array(viscosidades), fim - inicio
+
+    def plotar_dados_arestas(self, valores, label='Valor'):
         coord = self.rede.posicoes_nos
         edges = self.rede.conectividade
-
         fig, ax = plt.subplots(figsize=(10, 5))
-
         cmap = plt.get_cmap('jet')
-
-        norm = plt.Normalize(
-            temperaturas.min(),
-            temperaturas.max()
-        )
+        norm = plt.Normalize(valores.min(), valores.max())
 
         for k, (i, j) in enumerate(edges):
             x1, y1 = coord[i]
             x2, y2 = coord[j]
+            cor = cmap(norm(valores[k]))
+            ax.plot([x1, x2], [y1, y2], color=cor, linewidth=3)
 
-            cor = cmap(norm(temperaturas[k]))
-
-            ax.plot(
-                [x1, x2],
-                [y1, y2],
-                color=cor,
-                linewidth=3
-            )
-
-        sm = plt.cm.ScalarMappable(
-            cmap=cmap,
-            norm=norm
-        )
-
-        plt.colorbar(
-            sm,
-            ax=ax,
-            label='Temperatura média'
-        )
-
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        plt.colorbar(sm, ax=ax, label=label)
         ax.set_aspect('equal')
-
         plt.show()
 
     def temperaturas_nos(self, method='linear'):
         coords = self.rede.posicoes_nos
-
         interpolador = self.placa.criar_interpolador(method)
-
-        temperaturas = interpolador(coords)
-
-        return temperaturas
-
-    def atualizar_rede(self, method='linear'):
-        temperaturas = self.temperaturas_nos(method)
-
-        self.rede.atualizar_condutancias(
-            temperaturas
-        )
-
-        self.rede.resolver()
-
-        return temperaturas
+        return interpolador(coords)
 
     def plotar_rede_termica(self, method='linear'):
-        temperaturas = self.atualizar_rede(method)
-
+        temperaturas = self.temperaturas_nos(method)
         coord = self.rede.posicoes_nos
         edges = self.rede.conectividade
-
         fig, ax = plt.subplots(figsize=(10, 8))
 
         for (i, j) in edges:
             x1, y1 = coord[i]
             x2, y2 = coord[j]
-
-            ax.plot(
-                [x1, x2],
-                [y1, y2],
-                color='black',
-                linewidth=1.5,
-                zorder=1
-            )
+            ax.plot([x1, x2], [y1, y2], color='black', linewidth=1.5, zorder=1)
 
         scatter = ax.scatter(
-            coord[:,0],
-            coord[:,1],
+            coord[:, 0],
+            coord[:, 1],
             c=temperaturas,
             cmap='jet',
             s=250,
@@ -218,169 +131,182 @@ class HidraulicoTermico:
             zorder=2
         )
 
-        for i, (x, y) in enumerate(coord):
-            ax.text(
-                x,
-                y,
-                f'{i+1}',
-                ha='center',
-                va='center',
-                fontweight='bold',
-                color='white'
-            )
+        for idx, (x, y) in enumerate(coord):
+            ax.text(x, y, f'{idx+1}', ha='center', va='center', fontweight='bold', color='white')
 
-        plt.colorbar(
-            scatter,
-            ax=ax,
-            label='Temperatura (°C)'
-        )
-
+        plt.colorbar(scatter, ax=ax, label='Temperatura (°C)')
         ax.set_aspect('equal')
-
-        ax.set_title(
-            f'Temperatura nos nós ({method})'
-        )
-
+        ax.set_title(f'Temperatura nos nós ({method})')
         plt.show()
 
-    def mapa_contorno_grade_secundaria(
-        self,
-        Nx_sec,
-        Ny_sec,
-        method='linear'
-    ):
-        x_sec = np.linspace(
-            0.0,
-            self.placa.Lx,
-            Nx_sec
-        )
-
-        y_sec = np.linspace(
-            0.0,
-            self.placa.Ly,
-            Ny_sec
-        )
-
-        Xs, Ys = np.meshgrid(
-            x_sec,
-            y_sec,
-            indexing='ij'
-        )
-
-        pts = np.column_stack([
-            Xs.ravel(),
-            Ys.ravel()
-        ])
-
+    def mapa_contorno_grade_secundaria(self, Nx_sec, Ny_sec, method='linear'):
+        x_sec = np.linspace(0.0, self.placa.Lx, Nx_sec)
+        y_sec = np.linspace(0.0, self.placa.Ly, Ny_sec)
+        Xs, Ys = np.meshgrid(x_sec, y_sec, indexing='ij')
+        pts = np.column_stack([Xs.ravel(), Ys.ravel()])
         interpolador = self.placa.criar_interpolador(method)
-
-        T_sec = interpolador(pts).reshape(
-            Nx_sec,
-            Ny_sec
-        )
-
-        fig, ax = plt.subplots(figsize=(8,4))
-
-        cont = ax.contourf(
-            Xs,
-            Ys,
-            T_sec,
-            20,
-            cmap='jet'
-        )
-
-        ax.contour(
-            Xs,
-            Ys,
-            T_sec,
-            20,
-            colors='k',
-            linewidths=0.3
-        )
-
+        T_sec = interpolador(pts).reshape(Nx_sec, Ny_sec)
+        
+        fig, ax = plt.subplots(figsize=(8, 4))
+        cont = ax.contourf(Xs, Ys, T_sec, 20, cmap='jet')
+        ax.contour(Xs, Ys, T_sec, 20, colors='k', linewidths=0.3)
         ax.set_aspect('equal')
-
-        ax.set_title(
-            f'Interpolação {method} ({Nx_sec}x{Ny_sec})'
-        )
-
+        ax.set_title(f'Interpolação {method} ({Nx_sec}x{Ny_sec})')
         plt.colorbar(cont, ax=ax)
-
         plt.show()
+
+    def atualizar_condutancias_ex4(self, metodo='trapezio', n_sub=100):
+        T_med, _ = self.temperaturas_medias_arestas(metodo=metodo, n_sub=n_sub)
+        viscosidades = self.calcular_viscosidade(T_med)
+        self.rede.atualizar_condutancias(viscosidades)
+        self.rede.resolver()
+        return T_med
+
+    def atualizar_condutancias_ex5(self, metodo='trapezio', n_sub=100):
+        viscosidades_efetivas, _ = self.viscosidades_medias_arestas(metodo=metodo, n_sub=n_sub)
+        self.rede.atualizar_condutancias(viscosidades_efetivas)
+        self.rede.resolver()
+        return viscosidades_efetivas
 
 def ex_2_acoplamento():
     acoplamento = HidraulicoTermico(241, 121)
-
-    acoplamento.mapa_contorno_grade_secundaria(
-        101,
-        51,
-        method='linear'
-    )
-
-    acoplamento.mapa_contorno_grade_secundaria(
-        101,
-        51,
-        method='nearest'
-    )
-
-    acoplamento.mapa_contorno_grade_secundaria(
-        101,
-        51,
-        method='cubic'
-    )
-
-    acoplamento = HidraulicoTermico(61, 31)
-
-    acoplamento.mapa_contorno_grade_secundaria(
-        41,
-        21,
-        method='linear'
-    )
-
-    acoplamento.mapa_contorno_grade_secundaria(
-        41,
-        21,
-        method='nearest'
-    )
-
-    acoplamento.mapa_contorno_grade_secundaria(
-        41,
-        21,
-        method='cubic'
-    )
-
-    acoplamento.plotar_rede_termica(
-        method='linear'
-    )
+    for method in ['linear', 'nearest', 'cubic']:
+        acoplamento.mapa_contorno_grade_secundaria(101, 51, method=method)
+    
+    acoplamento_reduzido = HidraulicoTermico(61, 31)
+    for method in ['linear', 'nearest', 'cubic']:
+        acoplamento_reduzido.mapa_contorno_grade_secundaria(41, 21, method=method)
+    
+    acoplamento.plotar_rede_termica(method='linear')
 
 def ex_3_acoplamento():
     acoplamento = HidraulicoTermico(241, 121)
-
     configs = [
+        ('monte_carlo', 10),
+        ('monte_carlo', 100),
+        ('ponto_medio', 10),
+        ('ponto_medio', 100),
         ('trapezio', 1),
         ('trapezio', 10),
-        ('trapezio', 100),
-        ('trapezio', 1000),
-        ('simpson', 10),
-        ('simpson', 100),
-        ('simpson', 1000)
+        ('trapezio', 100)
     ]
 
     for metodo, n in configs:
-        Tmed, tempo = acoplamento.temperaturas_medias_arestas(
-            metodo=metodo,
-            n_sub=n
-        )
+        Tmed, tempo = acoplamento.temperaturas_medias_arestas(metodo=metodo, n_sub=n)
+        print(f'\nMétodo: {metodo}\nSubdivisões: {n}\nTempo: {tempo:.6f} s\nTemperatura média global: {Tmed.mean():.6f}')
 
-        print()
-        print(f'Método: {metodo}')
-        print(f'Subdivisões: {n}')
-        print(f'Tempo: {tempo:.6f} s')
-        print(f'Temperatura média global: {Tmed.mean():.6f}')
+    Tmed_plot, _ = acoplamento.temperaturas_medias_arestas(metodo='trapezio', n_sub=100)
+    acoplamento.plotar_dados_arestas(Tmed_plot, label='Temperatura Média (°C)')
 
-    Tmed, tempo = acoplamento.temperaturas_medias_arestas(
-        metodo='simpson',
-        n_sub=100
+def ex_4_acoplamento():
+    print("\n--- EXERCÍCIO 4: ANÁLISE DE CONVERGÊNCIA (MALHAS E QUADRATURA) ---")
+    malhas = [(61, 31), (121, 61), (241, 121)]
+    configuracoes = [('ponto_medio', 10), ('trapezio', 10), ('trapezio', 100)]
+    
+    resultados = []
+
+    for Nx, Ny in malhas:
+        sistema = HidraulicoTermico(Nx, Ny)
+        for metodo, n_sub in configuracoes:
+            inicio = time.perf_counter()
+            T_med = sistema.atualizar_condutancias_ex4(metodo=metodo, n_sub=n_sub)
+            fim = time.perf_counter()
+            
+            P_max = sistema.rede.pressao.max()
+            Pot = sistema.rede.calcular_potencia()
+            
+            resultados.append({
+                'Malha': f'{Nx}x{Ny}',
+                'Método': metodo,
+                'Subdivisões': n_sub,
+                'P_max (Pa)': P_max,
+                'Potência (W)': Pot,
+                'Tempo (s)': fim - inicio
+            })
+            
+    df = pd.DataFrame(resultados)
+    print(df.to_string(index=False))
+
+    sistema_plot = HidraulicoTermico(241, 121)
+    T_med_plot = sistema_plot.atualizar_condutancias_ex4(metodo='trapezio', n_sub=100)
+    sistema_plot.plotar_dados_arestas(T_med_plot, label='Temperatura Média (°C)')
+    sistema_plot.plotar_rede_termica(method='linear')
+
+def ex_5_acoplamento():
+    print("\n--- EXERCÍCIO 5: COMPARAÇÃO DE MODELAGEM DA VISCOSIDADE ---")
+    sistema = HidraulicoTermico(241, 121) 
+    
+    sistema.atualizar_condutancias_ex4(metodo='trapezio', n_sub=100)
+    P4 = sistema.rede.pressao.max()
+    Pot4 = sistema.rede.calcular_potencia()
+    
+    viscosidades_efetivas = sistema.atualizar_condutancias_ex5(metodo='trapezio', n_sub=100)
+    P5 = sistema.rede.pressao.max()
+    Pot5 = sistema.rede.calcular_potencia()
+    
+    diff_P = abs(P5 - P4) / P4 * 100
+    diff_Pot = abs(Pot5 - Pot4) / Pot4 * 100
+    
+    print(f"Método Ex 4 [ mu(<T>) ]: P_max = {P4:.6e} Pa | Potência = {Pot4:.6e} W")
+    print(f"Método Ex 5 [ <mu(T)> ]: P_max = {P5:.6e} Pa | Potência = {Pot5:.6e} W")
+    print("-" * 50)
+    print(f"Erro Relativo na Pressão Máxima: {diff_P:.4f}%")
+    print(f"Erro Relativo na Potência:       {diff_Pot:.4f}%")
+
+    if diff_P < 1.0:
+        print("-> Conclusão: A não-linearidade da função viscosidade gera um desvio baixo. A aproximação mu(<T>) é fisicamente aceitável para este gradiente térmico.")
+    else:
+        print("-> Conclusão: O desvio é significativo. O acoplamento exige a integração exata <mu(T)> para garantir precisão no Gêmeo Digital.")
+
+    sistema.plotar_dados_arestas(viscosidades_efetivas, label='Viscosidade Efetiva')
+    sistema.plotar_rede_termica(method='linear')
+
+
+if __name__ == '__main__':
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import time
+
+    placa = PlacaTermica(
+        Lx=0.03,
+        Ly=0.015,
+        Nx=241,
+        Ny=121,
+        k=0.25,
+        R=0.0025,
+        fonte_calor=5e5
     )
 
-    acoplamento.plotar_temperatura_arestas(Tmed)
+    inicio = time.perf_counter()
+    placa.resolver_circulo(Tc=35.0, mode='sparse')
+    fim = time.perf_counter()
+
+    print(f"Tempo de resolução do sistema térmico: {fim - inicio:.6f} s")
+
+    interpolador = placa.criar_interpolador(method='cubic')
+
+    X, Y = np.meshgrid(
+        np.linspace(0.0, placa.Lx, 300),
+        np.linspace(0.0, placa.Ly, 150),
+        indexing='ij'
+    )
+
+    pts = np.column_stack([X.ravel(), Y.ravel()])
+    
+    T_campo = interpolador(pts).reshape(300, 150)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    
+    contorno = ax.contourf(X, Y, T_campo, 40, cmap='jet')
+    ax.contour(X, Y, T_campo, 40, colors='black', linewidths=0.2)
+    
+    centro_x = placa.Lx / 2.0
+    centro_y = placa.Ly / 2.0
+    theta = np.linspace(0, 2 * np.pi, 100)
+    circ_x = centro_x + placa.R * np.cos(theta)
+    circ_y = centro_y + placa.R * np.sin(theta)
+    ax.plot(circ_x, circ_y, color='white', linestyle='--', linewidth=2)
+
+    ax.set_aspect('equal')
+    plt.colorbar(contorno, ax=ax)
+    plt.show()
