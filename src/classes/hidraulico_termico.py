@@ -246,24 +246,22 @@ def ex_2_acoplamento():
     
     acoplamento.plotar_rede_termica(method='linear')
 
+
 def ex_3_acoplamento():
     acoplamento = HidraulicoTermico(241, 121)
     configs = [
-        ('monte_carlo', 10),
-        ('monte_carlo', 100),
-        ('ponto_medio', 10),
-        ('ponto_medio', 100),
-        ('trapezio', 1),
-        ('trapezio', 10),
-        ('trapezio', 100)
+        ('monte_carlo', 10), ('monte_carlo', 100),
+        ('ponto_medio', 10), ('ponto_medio', 100),
+        ('trapezio', 1), ('trapezio', 10), ('trapezio', 100)
     ]
 
     for metodo, n in configs:
         Tmed, tempo = acoplamento.temperaturas_medias_arestas(metodo=metodo, n_sub=n)
-        print(f'\nMétodo: {metodo}\nSubdivisões: {n}\nTempo: {tempo:.6f} s\nTemperatura média global: {Tmed.mean():.6f}')
+        print(f'Método: {metodo} | Subdivisões: {n} | Tempo: {tempo:.6f} s | TMédia: {Tmed.mean():.6f}')
 
     Tmed_plot, _ = acoplamento.temperaturas_medias_arestas(metodo='trapezio', n_sub=100)
     acoplamento.plotar_dados_arestas(Tmed_plot, label='Temperatura Média (°C)')
+
 
 def ex_4_acoplamento():
     print("\n--- EXERCÍCIO 4: ANÁLISE DE CONVERGÊNCIA ---")
@@ -288,6 +286,7 @@ def ex_4_acoplamento():
                 tempos.append(time.perf_counter() - inicio)
 
             resultados.append({
+
                 'Malha': f'{Nx}x{Ny}',
                 'Método': metodo,
                 'Subdivisões': n_sub,
@@ -329,17 +328,122 @@ def ex_5_acoplamento():
     print(f"Erro Relativo na Pressão Máxima: {diff_P:.4f}%")
     print(f"Erro Relativo na Potência:       {diff_Pot:.4f}%")
 
-    if diff_P < 1.0:
-        print("-> Conclusão: A não-linearidade da função viscosidade gera um desvio baixo. A aproximação mu(<T>) é fisicamente aceitável para este gradiente térmico.")
-    else:
-        print("-> Conclusão: O desvio é significativo. O acoplamento exige a integração exata <mu(T)> para garantir precisão no Gêmeo Digital.")
-
     sistema.plotar_dados_arestas(viscosidades_efetivas, label='Viscosidade Efetiva')
     sistema.plotar_rede_termica(method='linear')
 
-    ########################################################################
-    # DISTÂNCIA ENTRE PONTO E SEGMENTO
-    ########################################################################
+def ex_2_extra():
+    print("\n" + "="*50)
+    print("   EXECUTANDO EXERCÍCIO 7: TERMO FONTE GAUSSIANO  ")
+    print("="*50)
+    
+    Nx, Ny = 241, 121  
+    Lx, Ly = 0.03, 0.015
+    d_max = 0.001  
+    
+    sim_base = HidraulicoTermico(Nx, Ny)
+    coord = sim_base.rede.posicoes_nos
+    edges = sim_base.rede.conectividade
+    
+    S0_valores = [1e5, -1e5, 5e5, -5e5, 1e6, -1e6]
+    distribuicoes = ['homogenea', 'espinha']
+    temperaturas_maximas = {}
+    
+    for dist in distribuicoes:
+        temperaturas_maximas[dist] = []
+        perfis_horizontais = []
+        perfis_verticais = []
+        
+        print(f"\n>> Iniciando análise para Distribuição: {dist.upper()}")
+        
+        for S0 in S0_valores:
+            print(f"   Calculando cenário S0 = {S0:+.1e} ...")
+            
+            # 1. Matriz Gaussiana Sp
+            Sp = calcular_termo_fonte_gaussiano(Nx, Ny, Lx, Ly, coord, edges, S0, dist, d_max)
+            
+            # 2. Fonte total combinada
+            fonte_total = 5e5 + Sp
+            
+            # 3. Nova placa térmica com termo fonte espacialmente correto
+            placa_modificada = PlacaTermica(
+                Lx=Lx, Ly=Ly, Nx=Nx, Ny=Ny, k=0.25, R=0.0025,
+                fonte_calor=fonte_total.T  
+            )
+            placa_modificada.resolver_circulo(Tc=35, mode='sparse')
+            
+            # 4. Extração de resultados
+            interpolador = placa_modificada.criar_interpolador('linear')
+            
+            x_g = np.linspace(0.0, Lx, Nx)
+            y_g = np.linspace(0.0, Ly, Ny)
+            Xs, Ys = np.meshgrid(x_g, y_g, indexing='ij')
+            pts_all = np.column_stack([Xs.ravel(), Ys.ravel()])
+            T_all = interpolador(pts_all)
+            
+            T_max = np.max(T_all)
+            temperaturas_maximas[dist].append((S0, T_max))
+            
+            # --- MAPA DE CONTORNO BI-DIMENSIONAL ---
+            fig, ax = plt.subplots(figsize=(8, 3.8))
+            T_grid = T_all.reshape(Nx, Ny)
+            cont = ax.contourf(Xs, Ys, T_grid, 20, cmap='jet')
+            ax.contour(Xs, Ys, T_grid, 20, colors='k', linewidths=0.2)
+            ax.set_aspect('equal')
+            ax.set_title(f'Mapa de Temperatura: {dist.capitalize()} (S0 = {S0:+.1e})')
+            ax.set_xlabel('X (m)')
+            ax.set_ylabel('Y (m)')
+            plt.colorbar(cont, ax=ax, label='Temperatura (°C)')
+            plt.tight_layout()
+            plt.show()
+            
+            # --- EXTRAÇÃO DOS PERFIS UNIDIMENSIONAIS ---
+            x_perf = np.linspace(0.0, Lx, 300)
+            y_perf = np.ones_like(x_perf) * (Ly / 2.0)
+            T_horiz = interpolador(np.column_stack([x_perf, y_perf]))
+            perfis_horizontais.append((S0, T_horiz))
+            
+            y_perf_v = np.linspace(0.0, Ly, 300)
+            x_perf_v = np.ones_like(y_perf_v) * (Lx / 2.0)
+            T_vert = interpolador(np.column_stack([x_perf_v, y_perf_v]))
+            perfis_verticais.append((S0, T_vert))
+            
+        # --- PLOT COMPARATIVO DOS PERFIS DA DISTRIBUIÇÃO ---
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        
+        for S0, T_h in perfis_horizontais:
+            ax1.plot(x_perf, T_h, label=f'S0 = {S0:+.1e}')
+        ax1.set_title(f'Perfis Horizontais (y = Ly/2) - {dist.capitalize()}')
+        ax1.set_xlabel('Posição X (m)')
+        ax1.set_ylabel('Temperatura (°C)')
+        ax1.legend()
+        ax1.grid(True)
+        
+        for S0, T_v in perfis_verticais:
+            ax2.plot(T_v, y_perf_v, label=f'S0 = {S0:+.1e}')
+        ax2.set_title(f'Perfis Verticais (x = Lx/2) - {dist.capitalize()}')
+        ax2.set_xlabel('Temperatura (°C)')
+        ax2.set_ylabel('Posição Y (m)')
+        ax2.legend()
+        ax2.grid(True)
+        
+        plt.tight_layout()
+        plt.show()
+
+    print("\n" + "="*60)
+    print("      TABELA COMPARATIVA DE TEMPERATURAS MÁXIMAS OBTIDAS")
+    print("="*60)
+    for dist in distribuicoes:
+        print(f"\nDistribuição: {dist.upper()}")
+        print(f"{'Intensidade S0':<15} | {'Temperatura Máxima (°C)':<25}")
+        print("-"*45)
+        for S0, T_max in temperaturas_maximas[dist]:
+            print(f"{S0:+.1e}        | {T_max:.4f} °C")
+    print("="*60)
+
+
+########################################################################
+# DISTÂNCIA ENTRE PONTO E SEGMENTO
+########################################################################
 
 
 
