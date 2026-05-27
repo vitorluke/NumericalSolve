@@ -20,6 +20,25 @@ class HidraulicoTermico:
             fonte_calor=5e5
         )
         self.rede = RedeHidraulica(levels=3)
+        
+        # =========================================================
+        # CORREÇÃO DEFINITIVA: Escala e Distribuição da Rede
+        # Garante que a rede ocupe apenas a região esquerda (0 a 0.02 m)
+        # e fique perfeitamente centralizada no eixo Y.
+        # =========================================================
+        max_x = np.max(self.rede.posicoes_nos[:, 0])
+        if max_x > 0:
+            fator_escala = 0.02 / max_x
+            self.rede.posicoes_nos[:, 0] *= fator_escala
+            self.rede.posicoes_nos[:, 1] *= fator_escala  # Mantém a proporção geométrica
+            
+        y_min = np.min(self.rede.posicoes_nos[:, 1])
+        y_max = np.max(self.rede.posicoes_nos[:, 1])
+        y_mid = (y_min + y_max) / 2.0
+        
+        # Move a rede para o centro exato da placa (Ly / 2)
+        self.rede.posicoes_nos[:, 1] += (self.placa.Ly / 2.0) - y_mid
+        
         kx, ky = self.calcular_k_faces(dmax=0.001)
         self.placa.T = self.resolver_sistema_ex1(kx, ky, Tc=35.0)
 
@@ -41,11 +60,8 @@ class HidraulicoTermico:
         t = np.dot(ap, ab) / np.dot(ab, ab)
         t = np.clip(t, 0.0, 1.0)
         
-
         proj = a + t * ab
         return np.linalg.norm(p - proj)
-
-    # ... [MANTENHA AQUI SEUS MÉTODOS DE INTEGRAÇÃO DE LINHA E PLOTAGEM] ...
 
     def integrar_linha(self, p0, p1, func, metodo='trapezio', n_sub=100):
         if metodo == 'monte_carlo':
@@ -185,6 +201,7 @@ class HidraulicoTermico:
         self.rede.atualizar_condutancias(viscosidades)
         self.rede.resolver()
         return T_med
+        
     def atualizar_condutancias_ex5(self, metodo='trapezio', n_sub=100):
         viscosidades_efetivas, _ = self.viscosidades_medias_arestas(metodo=metodo, n_sub=n_sub)
         self.rede.atualizar_condutancias(viscosidades_efetivas)
@@ -192,14 +209,10 @@ class HidraulicoTermico:
         return viscosidades_efetivas
 
     # =======================================================================
-    # NOVA ARQUITETURA: VOLUMES FINITOS PARA O EXERCÍCIO 1
+    # FÍSICA E PLOTAGEM CORRIGIDAS (EXERCÍCIO 1)
     # =======================================================================
 
     def calcular_k_faces(self, dmax):
-        """
-        Calcula a condutividade modificada exatamente nas FACES entre os nós.
-        [VERSÃO VETORIZADA: Milhares de vezes mais rápida]
-        """
         Nx, Ny = self.placa.Nx, self.placa.Ny
         dx = self.placa.Lx / (Nx - 1)
         dy = self.placa.Ly / (Ny - 1)
@@ -208,26 +221,20 @@ class HidraulicoTermico:
         kx_faces = np.full((Nx - 1, Ny), k_base)
         ky_faces = np.full((Nx, Ny - 1), k_base)
 
-        # ---------------------------------------------------------
-        # PRE-COMPUTAÇÃO DOS VETORES DAS ARESTAS (Matador de lentidão)
-        # ---------------------------------------------------------
         edges = np.array(self.rede.conectividade)
-        A = self.rede.posicoes_nos[edges[:, 0]]  # Pontos iniciais de todas as arestas
-        B = self.rede.posicoes_nos[edges[:, 1]]  # Pontos finais de todas as arestas
+        A = self.rede.posicoes_nos[edges[:, 0]]
+        B = self.rede.posicoes_nos[edges[:, 1]]
         AB = B - A
         AB_len_sq = np.sum(AB**2, axis=1)
         
-        # Evita divisão por zero se houver arestas de tamanho zero na malha
         valid = AB_len_sq > 0
 
-        # 1. Varredura nas faces horizontais (X)
         for i in range(Nx - 1):
             for j in range(Ny):
                 px = (i + 0.5) * dx
                 py = j * dy
                 P = np.array([px, py])
                 
-                # Cálculo vetorizado da distância do ponto P para TODAS as arestas
                 AP = P - A
                 t = np.zeros(len(edges))
                 t[valid] = np.sum(AP[valid] * AB[valid], axis=1) / AB_len_sq[valid]
@@ -235,18 +242,15 @@ class HidraulicoTermico:
                 proj = A + t[:, np.newaxis] * AB
                 d = np.linalg.norm(P - proj, axis=1)
                 
-                # Aplica a máscara e soma apenas os que estão dentro do dmax
                 mask = d < dmax
                 kx_faces[i, j] = k_base * (1.0 + np.sum(1.0 / (1.0 + (d[mask] / dmax))))
 
-        # 2. Varredura nas faces verticais (Y)
         for i in range(Nx):
             for j in range(Ny - 1):
                 px = i * dx
                 py = (j + 0.5) * dy
                 P = np.array([px, py])
                 
-                # Cálculo vetorizado
                 AP = P - A
                 t = np.zeros(len(edges))
                 t[valid] = np.sum(AP[valid] * AB[valid], axis=1) / AB_len_sq[valid]
@@ -260,10 +264,6 @@ class HidraulicoTermico:
         return kx_faces, ky_faces
 
     def resolver_sistema_ex1(self, kx_faces, ky_faces, Tc=35.0):
-        """
-        Monta e resolve o sistema linear esparso utilizando as condutâncias 
-        das faces calculadas previamente.
-        """
         Nx, Ny = self.placa.Nx, self.placa.Ny
         dx = self.placa.Lx / (Nx - 1)
         dy = self.placa.Ly / (Ny - 1)
@@ -272,37 +272,34 @@ class HidraulicoTermico:
         rows, cols, data = [], [], []
         b = np.zeros(nunk)
         
-        # Centro do círculo (assumindo centro da placa)
-        xc, yc = self.placa.Lx / 2.0, self.placa.Ly / 2.0
+        # Posição correta do círculo
+        xc, yc = self.placa.Lx * 0.75, self.placa.Ly * 0.5
         R = self.placa.R
 
         for j in range(Ny):
             for i in range(Nx):
-                # Usando seu indexador global original
                 Ic = i + j * Nx 
                 
                 x_coord = i * dx
                 y_coord = j * dy
-                dist_centro = np.sqrt((x_coord - xc)**2 + (y_coord - yc)**2)
+                dist_sq = (x_coord - xc)**2 + (y_coord - yc)**2
 
-                # Condição 1: Nó dentro da inclusão circular (Temperatura Fixa)
-                if dist_centro <= R:
+                if dist_sq <= R**2:
                     rows.append(Ic); cols.append(Ic); data.append(1.0)
                     b[Ic] = Tc
 
-                # Condição 2: Condições de contorno das bordas
-                # ATENÇÃO: Ajuste as temperaturas das bordas (TR, TL, TT, TB) de 
-                # acordo com o que a sua PlacaTermica original define!
-                elif i == Nx - 1: # Borda Direita
-                    rows.append(Ic); cols.append(Ic); data.append(1.0); b[Ic] = 20.0 # Exemplo
-                elif i == 0:      # Borda Esquerda
-                    rows.append(Ic); cols.append(Ic); data.append(1.0); b[Ic] = 20.0 # Exemplo
-                elif j == Ny - 1: # Borda Superior
-                    rows.append(Ic); cols.append(Ic); data.append(1.0); b[Ic] = 20.0 # Exemplo
-                elif j == 0:      # Borda Inferior
-                    rows.append(Ic); cols.append(Ic); data.append(1.0); b[Ic] = 20.0 # Exemplo
+                elif i == 0:
+                    rows.append(Ic); cols.append(Ic); data.append(1.0)
+                    b[Ic] = 10.0
+                    
+                elif i == Nx - 1:
+                    rows.append(Ic); cols.append(Ic); data.append(1.0)
+                    b[Ic] = 30.0
+                    
+                elif j == 0 or j == Ny - 1:
+                    rows.append(Ic); cols.append(Ic); data.append(1.0)
+                    b[Ic] = 10.0 + 20.0 * (i / (Nx - 1))
                 
-                # Equação de Balanço de Energia (Nó interno)
                 else:
                     Ie = (i + 1) + j * Nx
                     Iw = (i - 1) + j * Nx
@@ -331,6 +328,7 @@ class HidraulicoTermico:
 
         A_sparse = sparse.coo_matrix((data, (rows, cols)), shape=(nunk, nunk)).tocsr()
         T_resolvido = spsolve(A_sparse, b)
+        
         return T_resolvido
 
     def exercicio_1_2(self):
@@ -345,56 +343,92 @@ class HidraulicoTermico:
                 print(f"\n--- dmax = {dmax} ---")
                 inicio = time.perf_counter()
                 
-                # Instanciamos o sistema fresco para evitar reuso sujo de cache
                 sistema = HidraulicoTermico(Nx, Ny)
                 dx = sistema.placa.Lx / (Nx - 1)
                 dy = sistema.placa.Ly / (Ny - 1)
 
-                # 1. Calcula os perfis de K nas interfaces (FACES)
                 kx_faces, ky_faces = sistema.calcular_k_faces(dmax)
-
-                # 2. Resolve a física utilizando a formulação por Volumes Finitos
                 T_array = sistema.resolver_sistema_ex1(kx_faces, ky_faces, Tc=35.0)
                 
-                # Atualiza a placa com o resultado
                 sistema.placa.T = T_array
-                T_grid = T_array.reshape((Ny, Nx)).T # Transposto para bater com o meshgrid
+                T_grid = T_array.reshape((Ny, Nx)).T 
                 
                 tempo_total = time.perf_counter() - inicio
 
-                # 3. Plotagem
+                # ==========================================
+                # PLOTAGEM ESTILO REFERÊNCIA (Rede Direcionada)
+                # ==========================================
                 X_plot, Y_plot = np.meshgrid(np.linspace(0, sistema.placa.Lx, Nx), 
                                              np.linspace(0, sistema.placa.Ly, Ny), indexing='ij')
                 
-                plt.figure(figsize=(6, 4))
-                plt.contourf(X_plot, Y_plot, T_grid, 50, cmap='jet')
-                plt.colorbar(label="Temperatura (°C)")
-                plt.title(f"Temperatura - {Nx}x{Ny} - dmax={dmax}")
+                fig, ax = plt.subplots(figsize=(10, 4.5))
+                
+                contorno = ax.contourf(X_plot, Y_plot, T_grid, 50, cmap='jet')
+                ax.contour(X_plot, Y_plot, T_grid, 20, colors='k', linewidths=0.2)
+                
+                coord = sistema.rede.posicoes_nos
+                edges = sistema.rede.conectividade
+                
+                # Plot das arestas com setas no meio
+                for (n1, n2) in edges:
+                    x1, y1 = coord[n1]
+                    x2, y2 = coord[n2]
+                    ax.plot([x1, x2], [y1, y2], color='black', linewidth=0.8, zorder=2)
+                    
+                    xm, ym = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                    vec_x, vec_y = x2 - x1, y2 - y1
+                    ax.annotate('', xy=(xm + vec_x*0.05, ym + vec_y*0.05), xytext=(xm - vec_x*0.05, ym - vec_y*0.05),
+                                arrowprops=dict(arrowstyle="-|>", color="black", lw=1.0), zorder=3)
+                
+                # Colore os nós como 'salmão' imitando o coolwarm da referência
+                ax.scatter(coord[:, 0], coord[:, 1], facecolors='#ffb3b3', edgecolors='black', s=25, zorder=4)
+
+                # Trava a janela do plot nas dimensões físicas da placa para não vazar
+                ax.set_xlim(0, sistema.placa.Lx)
+                ax.set_ylim(0, sistema.placa.Ly)
+                ax.set_aspect('equal')
+                
+                ax.set_title(f"Temperatura e Rede Hidráulica - {Nx}x{Ny} | dmax={dmax}")
+                ax.set_xlabel('x (m)')
+                ax.set_ylabel('y (m)')
+
+                plt.colorbar(contorno, ax=ax, label="Temperatura (°C)", orientation='vertical', pad=0.02)
+                plt.tight_layout()
                 plt.show()
 
+                # ==========================================
                 # Perfis 1D
-                mid_vertical = T_grid[:, Ny // 2]
-                mid_horizontal = T_grid[Nx // 2, :]
+                # ==========================================
+                # ==========================================
+                # Perfis 1D (CORRIGIDO)
+                # ==========================================
+                # T_grid tem shape (Nx, Ny)
+                # Fixa X no centro, varia Y -> Tamanho Ny (31)
+                mid_vertical = T_grid[Nx // 2, :]  
+                
+                # Fixa Y no centro, varia X -> Tamanho Nx (61)
+                mid_horizontal = T_grid[:, Ny // 2] 
 
                 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+                
+                # Plot Vertical: Y (tamanho Ny) vs T (tamanho Ny)
+                ax1.plot(np.linspace(0, sistema.placa.Ly, Ny), mid_vertical)
+                ax1.set_title(f"Perfil vertical (x={sistema.placa.Lx/2:.4f})")
+                ax1.set_xlabel("y (m)")
+                ax1.set_ylabel("T (°C)")
+                ax1.grid(True)
 
-                fig.suptitle(f"{Nx}x{Ny} - dmax={dmax}")
-
-                ax1.plot(mid_vertical)
-                ax1.set_title("Perfil vertical (centro)")
-                ax1.set_xlabel("y")
-                ax1.set_ylabel("T")
-
-                ax2.plot(mid_horizontal)
-                ax2.set_title("Perfil horizontal (centro)")
-                ax2.set_xlabel("x")
+                # Plot Horizontal: X (tamanho Nx) vs T (tamanho Nx)
+                ax2.plot(np.linspace(0, sistema.placa.Lx, Nx), mid_horizontal)
+                ax2.set_title(f"Perfil horizontal (y={sistema.placa.Ly/2:.4f})")
+                ax2.set_xlabel("x (m)")
+                ax2.grid(True)
                 
                 plt.tight_layout()
                 plt.show()
 
                 Tmax = np.max(T_grid)
 
-                # Armazena os dados do DataFrame
                 resultados.append({
                     "malha": f"{Nx}x{Ny}",
                     "dmax": dmax,
@@ -404,6 +438,10 @@ class HidraulicoTermico:
 
         return pd.DataFrame(resultados)
     
+
+# =======================================================================
+# FUNÇÕES DE EXECUÇÃO AUXILIARES
+# =======================================================================
 
 def ex_2_acoplamento():
     acoplamento = HidraulicoTermico(241, 121)
@@ -420,8 +458,9 @@ def ex_2_acoplamento():
 def ex_3_acoplamento():
     acoplamento = HidraulicoTermico(241, 121)
     configs = [
-        ('ponto_medio', 10), ('ponto_medio', 100), ('ponto_medio', 1000),
-        ('trapezio', 10), ('trapezio', 100), ('trapezio', 1000)
+        ('monte_carlo', 10), ('monte_carlo', 100),
+        ('ponto_medio', 10), ('ponto_medio', 100),
+        ('trapezio', 1), ('trapezio', 10), ('trapezio', 100)
     ]
 
     for metodo, n in configs:
@@ -443,11 +482,9 @@ def ex_4_acoplamento():
         print(f"Processando malha: {Nx}x{Ny}...")
         sistema = HidraulicoTermico(Nx, Ny)
         
-        # Warm-up: executa uma vez sem medir para forçar alocações e aquecer o cache
         sistema.atualizar_condutancias_ex4(metodo='trapezio', n_sub=10)
         
         for metodo, n_sub in configuracoes:
-            # Medição com média de 5 execuções para eliminar ruído do OS
             tempos = []
             for _ in range(5):
                 inicio = time.perf_counter()
@@ -455,7 +492,6 @@ def ex_4_acoplamento():
                 tempos.append(time.perf_counter() - inicio)
 
             resultados.append({
-
                 'Malha': f'{Nx}x{Ny}',
                 'Método': metodo,
                 'Subdivisões': n_sub,
@@ -464,16 +500,13 @@ def ex_4_acoplamento():
                 'Tempo_Medio (s)': np.mean(tempos)
             })
 
-    # Formatação limpa do DataFrame
     df = pd.DataFrame(resultados)
     pd.options.display.float_format = '{:.7e}'.format
     print("\n" + df.to_string(index=False))
 
-    # Visualização final focada na malha mais refinada
     print("\nGerando visualização da convergência...")
     sistema.plotar_dados_arestas(sistema.temperaturas_medias_arestas(metodo='trapezio', n_sub=100)[0], label='Temperatura Média (°C)')
     sistema.plotar_rede_termica(method='linear')
-
 
 
 def calcular_termo_fonte_gaussiano(Nx, Ny, Lx, Ly, coord, edges, S0, distribuicao, d_max=0.001):
@@ -544,6 +577,7 @@ def ex_5_acoplamento():
     sistema.plotar_dados_arestas(viscosidades_efetivas, label='Viscosidade Efetiva')
     sistema.plotar_rede_termica(method='linear')
 
+
 def ex_2_extra():
     print("\n" + "="*50)
     print("   EXECUTANDO EXERCÍCIO 7: TERMO FONTE GAUSSIANO  ")
@@ -571,22 +605,16 @@ def ex_2_extra():
         for S0 in S0_valores:
             print(f"   Calculando cenário S0 = {S0:+.1e} ...")
             
-            # 1. Matriz Gaussiana Sp
             Sp = calcular_termo_fonte_gaussiano(Nx, Ny, Lx, Ly, coord, edges, S0, dist, d_max)
-            
-            # 2. Fonte total combinada
             fonte_total = 5e5 + Sp
             
-            # 3. Nova placa térmica com termo fonte espacialmente correto
             placa_modificada = PlacaTermica(
                 Lx=Lx, Ly=Ly, Nx=Nx, Ny=Ny, k=0.25, R=0.0025,
                 fonte_calor=fonte_total.T  
             )
             placa_modificada.resolver_circulo(Tc=35, mode='sparse')
             
-            # 4. Extração de resultados
             interpolador = placa_modificada.criar_interpolador('linear')
-            
             x_g = np.linspace(0.0, Lx, Nx)
             y_g = np.linspace(0.0, Ly, Ny)
             Xs, Ys = np.meshgrid(x_g, y_g, indexing='ij')
@@ -596,7 +624,6 @@ def ex_2_extra():
             T_max = np.max(T_all)
             temperaturas_maximas[dist].append((S0, T_max))
             
-            # --- MAPA DE CONTORNO BI-DIMENSIONAL ---
             fig, ax = plt.subplots(figsize=(8, 3.8))
             T_grid = T_all.reshape(Nx, Ny)
             cont = ax.contourf(Xs, Ys, T_grid, 20, cmap='jet')
@@ -609,7 +636,6 @@ def ex_2_extra():
             plt.tight_layout()
             plt.show()
             
-            # --- EXTRAÇÃO DOS PERFIS UNIDIMENSIONAIS ---
             x_perf = np.linspace(0.0, Lx, 300)
             y_perf = np.ones_like(x_perf) * (Ly / 2.0)
             T_horiz = interpolador(np.column_stack([x_perf, y_perf]))
@@ -620,7 +646,6 @@ def ex_2_extra():
             T_vert = interpolador(np.column_stack([x_perf_v, y_perf_v]))
             perfis_verticais.append((S0, T_vert))
             
-        # --- PLOT COMPARATIVO DOS PERFIS DA DISTRIBUIÇÃO ---
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
         
         for S0, T_h in perfis_horizontais:
@@ -654,26 +679,17 @@ def ex_2_extra():
     print("="*60)
 
 
-########################################################################
-# DISTÂNCIA ENTRE PONTO E SEGMENTO
-########################################################################
-
-
-
 def ex_1_especial_acoplamento():
     print("\n--- INICIANDO ROTINA ESPECIAL: MAPA DE PROXIMIDADE E CONDUTIVIDADE ---")
-    
-    # Instanciamos uma malha de resolução baixa apenas como gatilho para acessar o método,
-    # já que o próprio exercicio_1_2 fará a instanciação das malhas de teste internamente.
     sistema_gatilho = HidraulicoTermico(61, 31)
-    
     print("Iniciando varredura de malhas e cálculo de distâncias (isso pode demorar devido aos laços não-vetorizados)...")
-    
-    # Executa a rotina que gera os gráficos de contorno e perfis 1D
     df_resultados = sistema_gatilho.exercicio_1_2()
-    
     print("\n=======================================================")
     print("RESULTADOS GLOBAIS: TEMPERATURA MÁXIMA vs DISTÂNCIA (dmax)")
     print("=======================================================")
     print(df_resultados.to_string(index=False))
-    
+
+if __name__ == "__main__":
+    # Teste isolado do exercício corrigido
+    sistema_teste = HidraulicoTermico(61, 31)
+    sistema_teste.exercicio_1_2()
