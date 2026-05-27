@@ -307,6 +307,50 @@ def ex_4_acoplamento():
 
 
 
+def calcular_termo_fonte_gaussiano(Nx, Ny, Lx, Ly, coord, edges, S0, distribuicao, d_max=0.001):
+    sigma = d_max / 2.0
+    x_grid = np.linspace(0.0, Lx, Nx)
+    y_grid = np.linspace(0.0, Ly, Ny)
+    Xs, Ys = np.meshgrid(x_grid, y_grid, indexing='ij')
+    
+    P = np.column_stack([Xs.ravel(), Ys.ravel()])
+    N_pts = P.shape[0]
+    
+    num_arestas = len(edges)
+    I = np.zeros(num_arestas)
+    
+    if distribuicao == 'homogenea':
+        I[:] = 1.0
+    elif distribuicao == 'espinha':
+        I[:] = 0.1
+        y_centro = 0.5 * Ly
+        tol = 1e-6
+        for j, (idx_a, idx_b) in enumerate(edges):
+            if abs(coord[idx_a, 1] - y_centro) < tol and abs(coord[idx_b, 1] - y_centro) < tol:
+                I[j] = 100.0
+                
+    soma_gaussiana = np.zeros(N_pts)
+    
+    for k, (idx_a, idx_b) in enumerate(edges):
+        a = coord[idx_a]
+        b = coord[idx_b]
+        ab = b - a
+        ap = P - a
+        ab_len_sq = np.sum(ab**2)
+        
+        if ab_len_sq > 0:
+            t = np.dot(ap, ab) / ab_len_sq
+            t = np.clip(t, 0.0, 1.0)
+            p_proj = a + t[:, np.newaxis] * ab
+            d = np.linalg.norm(P - p_proj, axis=1)
+            
+            dentro_do_raio = d <= d_max
+            soma_gaussiana[dentro_do_raio] += I[k] * np.exp(-(d[dentro_do_raio]**2) / (2.0 * (sigma**2)))
+            
+    Sp = (S0 * soma_gaussiana).reshape(Nx, Ny)
+    return Sp
+
+
 def ex_5_acoplamento():
     print("\n--- EXERCÍCIO 5: COMPARAÇÃO DE MODELAGEM DA VISCOSIDADE ---")
     sistema = HidraulicoTermico(241, 121) 
