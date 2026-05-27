@@ -165,6 +165,7 @@ def main():
     # ex_4_acoplamento()
     # ex_5_acoplamento()
     ex_2_extra()
+    # ex_1_especial_acoplamento()
 
 
 if __name__ == "__main__":

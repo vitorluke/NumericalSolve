@@ -609,7 +609,7 @@ def ex_2_extra():
             # 3. Nova placa térmica com termo fonte espacialmente correto
             placa_modificada = PlacaTermica(
                 Lx=Lx, Ly=Ly, Nx=Nx, Ny=Ny, k=0.25, R=0.0025,
-                fonte_calor=fonte_total
+                fonte_calor=fonte_total.T  
             )
             placa_modificada.resolver_circulo(Tc=35, mode='sparse')
             
