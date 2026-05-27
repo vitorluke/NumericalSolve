@@ -377,6 +377,9 @@ class HidraulicoTermico:
                 mid_horizontal = T_grid[Nx // 2, :]
 
                 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+
+                fig.suptitle(f"{Nx}x{Ny} - dmax={dmax}")
+
                 ax1.plot(mid_vertical)
                 ax1.set_title("Perfil vertical (centro)")
                 ax1.set_xlabel("y")
