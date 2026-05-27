@@ -19,6 +19,7 @@ class HidraulicoTermico:
         )
         self.placa.resolver_circulo(Tc=35, mode='sparse')
         self.rede = RedeHidraulica(levels=3)
+        self.mapa_proximidade = None
 
     def calcular_viscosidade(self, T):
         return 0.001791 / (1.0 + 0.03368 * T + 0.000221 * (T**2))
@@ -42,7 +43,7 @@ class HidraulicoTermico:
             valores = func(pts)
             return (np.sum(valores) - 0.5 * (valores[0] + valores[-1])) / n_sub
 
-        raise ValueError()
+        raise ValueError("Método de integração desconhecido.")
 
     def temperatura_media_aresta(self, i, j, interpolador, metodo='trapezio', n_sub=100):
         p0 = self.rede.posicoes_nos[i]
@@ -168,6 +169,112 @@ class HidraulicoTermico:
         self.rede.resolver()
         return viscosidades_efetivas
 
+    def distancia_ponto_segmento(self, p, a, b):
+        ab = b - a
+        ap = p - a
+        ab_len_sq = np.dot(ab, ab)
+        if ab_len_sq == 0:
+            return np.linalg.norm(ap)
+        t = np.dot(ap, ab) / ab_len_sq
+        t = np.clip(t, 0.0, 1.0)
+        proj = a + t * ab
+        return np.linalg.norm(p - proj)
+
+    def criar_mapa_proximidade(self, dmax):
+        mapa = {}
+        Nx = self.placa.Nx
+        Ny = self.placa.Ny
+
+        for i in range(Nx):
+            for j in range(Ny):
+                kglobal = i + j * Nx
+                x = self.placa.X[i, j]
+                y = self.placa.Y[i, j]
+                p = np.array([x, y])
+                vizinhos = []
+
+                for edge_id, (n1, n2) in enumerate(self.rede.conectividade):
+                    a = self.rede.posicoes_nos[n1]
+                    b = self.rede.posicoes_nos[n2]
+                    d = self.distancia_ponto_segmento(p, a, b)
+
+                    if d < dmax:
+                        vizinhos.append((edge_id, d))
+                mapa[kglobal] = vizinhos
+        return mapa
+
+    def k_interface(self, p, mapa):
+        Nx = self.placa.Nx
+        Ny = self.placa.Ny
+        dx = self.placa.dx
+        dy = self.placa.dy
+        x, y = p
+
+        i = int(round(x / dx))
+        j = int(round(y / dy))
+        i = np.clip(i, 0, Nx - 1)
+        j = np.clip(j, 0, Ny - 1)
+        kglobal = i + j * Nx
+
+        vizinhos = mapa[kglobal]
+        soma = 0.0
+        for edge_id, d in vizinhos:
+            soma += 1.0 / (1.0 + d)
+
+        return self.placa.k * (1.0 + soma)
+
+    def inicializar_proximidade(self, dmax):
+        self.mapa_proximidade = self.criar_mapa_proximidade(dmax)
+
+
+# ==============================================================================
+# FUNÇÕES GLOBAIS E EXERCÍCIOS
+# ==============================================================================
+
+def calcular_termo_fonte_gaussiano(Nx, Ny, Lx, Ly, coord, edges, S0, distribuicao, d_max=0.001):
+    sigma = d_max / 2.0
+    x_grid = np.linspace(0.0, Lx, Nx)
+    y_grid = np.linspace(0.0, Ly, Ny)
+    Xs, Ys = np.meshgrid(x_grid, y_grid, indexing='ij')
+    
+    P = np.column_stack([Xs.ravel(), Ys.ravel()])
+    N_pts = P.shape[0]
+    
+    num_arestas = len(edges)
+    I = np.zeros(num_arestas)
+    
+    if distribuicao == 'homogenea':
+        I[:] = 1.0
+    elif distribuicao == 'espinha':
+        I[:] = 0.1
+        y_centro = 0.5 * Ly
+        tol = 1e-6
+        for j, (idx_a, idx_b) in enumerate(edges):
+            if abs(coord[idx_a, 1] - y_centro) < tol and abs(coord[idx_b, 1] - y_centro) < tol:
+                I[j] = 100.0
+                
+    soma_gaussiana = np.zeros(N_pts)
+    
+    for k, (idx_a, idx_b) in enumerate(edges):
+        a = coord[idx_a]
+        b = coord[idx_b]
+        ab = b - a
+        ap = P - a
+        ab_len_sq = np.sum(ab**2)
+        
+        if ab_len_sq > 0:
+            t = np.dot(ap, ab) / ab_len_sq
+            t = np.clip(t, 0.0, 1.0)
+            p_proj = a + t[:, np.newaxis] * ab
+            d = np.linalg.norm(P - p_proj, axis=1)
+            
+            dentro_do_raio = d <= d_max
+            soma_gaussiana[dentro_do_raio] += I[k] * np.exp(-(d[dentro_do_raio]**2) / (2.0 * (sigma**2)))
+            
+    Sp = (S0 * soma_gaussiana).reshape(Nx, Ny)
+    return Sp
+
+
 def ex_2_acoplamento():
     acoplamento = HidraulicoTermico(241, 121)
     for method in ['linear', 'nearest', 'cubic']:
@@ -179,30 +286,27 @@ def ex_2_acoplamento():
     
     acoplamento.plotar_rede_termica(method='linear')
 
+
 def ex_3_acoplamento():
     acoplamento = HidraulicoTermico(241, 121)
     configs = [
-        ('monte_carlo', 10),
-        ('monte_carlo', 100),
-        ('ponto_medio', 10),
-        ('ponto_medio', 100),
-        ('trapezio', 1),
-        ('trapezio', 10),
-        ('trapezio', 100)
+        ('monte_carlo', 10), ('monte_carlo', 100),
+        ('ponto_medio', 10), ('ponto_medio', 100),
+        ('trapezio', 1), ('trapezio', 10), ('trapezio', 100)
     ]
 
     for metodo, n in configs:
         Tmed, tempo = acoplamento.temperaturas_medias_arestas(metodo=metodo, n_sub=n)
-        print(f'\nMétodo: {metodo}\nSubdivisões: {n}\nTempo: {tempo:.6f} s\nTemperatura média global: {Tmed.mean():.6f}')
+        print(f'Método: {metodo} | Subdivisões: {n} | Tempo: {tempo:.6f} s | TMédia: {Tmed.mean():.6f}')
 
     Tmed_plot, _ = acoplamento.temperaturas_medias_arestas(metodo='trapezio', n_sub=100)
     acoplamento.plotar_dados_arestas(Tmed_plot, label='Temperatura Média (°C)')
+
 
 def ex_4_acoplamento():
     print("\n--- EXERCÍCIO 4: ANÁLISE DE CONVERGÊNCIA (MALHAS E QUADRATURA) ---")
     malhas = [(61, 31), (121, 61), (241, 121)]
     configuracoes = [('ponto_medio', 10), ('trapezio', 10), ('trapezio', 100)]
-    
     resultados = []
 
     for Nx, Ny in malhas:
@@ -216,12 +320,8 @@ def ex_4_acoplamento():
             Pot = sistema.rede.calcular_potencia()
             
             resultados.append({
-                'Malha': f'{Nx}x{Ny}',
-                'Método': metodo,
-                'Subdivisões': n_sub,
-                'P_max (Pa)': P_max,
-                'Potência (W)': Pot,
-                'Tempo (s)': fim - inicio
+                'Malha': f'{Nx}x{Ny}', 'Método': metodo, 'Subdivisões': n_sub,
+                'P_max (Pa)': P_max, 'Potência (W)': Pot, 'Tempo (s)': fim - inicio
             })
             
     df = pd.DataFrame(resultados)
@@ -231,7 +331,6 @@ def ex_4_acoplamento():
     T_med_plot = sistema_plot.atualizar_condutancias_ex4(metodo='trapezio', n_sub=100)
     sistema_plot.plotar_dados_arestas(T_med_plot, label='Temperatura Média (°C)')
     sistema_plot.plotar_rede_termica(method='linear')
-
 
 
 def ex_5_acoplamento():
@@ -255,156 +354,119 @@ def ex_5_acoplamento():
     print(f"Erro Relativo na Pressão Máxima: {diff_P:.4f}%")
     print(f"Erro Relativo na Potência:       {diff_Pot:.4f}%")
 
-    if diff_P < 1.0:
-        print("-> Conclusão: A não-linearidade da função viscosidade gera um desvio baixo. A aproximação mu(<T>) é fisicamente aceitável para este gradiente térmico.")
-    else:
-        print("-> Conclusão: O desvio é significativo. O acoplamento exige a integração exata <mu(T)> para garantir precisão no Gêmeo Digital.")
-
     sistema.plotar_dados_arestas(viscosidades_efetivas, label='Viscosidade Efetiva')
     sistema.plotar_rede_termica(method='linear')
 
-    ########################################################################
-    # DISTÂNCIA ENTRE PONTO E SEGMENTO
-    ########################################################################
 
-def distancia_ponto_segmento(
-     self,
-     p,
-    a,
-    b
-):
-    ab = b - a
+def ex_2_extra():
+    print("\n" + "="*50)
+    print("   EXECUTANDO EXERCÍCIO 7: TERMO FONTE GAUSSIANO  ")
+    print("="*50)
+    
+    Nx, Ny = 241, 121  
+    Lx, Ly = 0.03, 0.015
+    d_max = 0.001  
+    
+    sim_base = HidraulicoTermico(Nx, Ny)
+    coord = sim_base.rede.posicoes_nos
+    edges = sim_base.rede.conectividade
+    
+    S0_valores = [1e5, -1e5, 5e5, -5e5, 1e6, -1e6]
+    distribuicoes = ['homogenea', 'espinha']
+    temperaturas_maximas = {}
+    
+    for dist in distribuicoes:
+        temperaturas_maximas[dist] = []
+        perfis_horizontais = []
+        perfis_verticais = []
+        
+        print(f"\n>> Iniciando análise para Distribuição: {dist.upper()}")
+        
+        for S0 in S0_valores:
+            print(f"   Calculando cenário S0 = {S0:+.1e} ...")
+            
+            # 1. Matriz Gaussiana Sp
+            Sp = calcular_termo_fonte_gaussiano(Nx, Ny, Lx, Ly, coord, edges, S0, dist, d_max)
+            
+            # 2. Fonte total combinada
+            fonte_total = 5e5 + Sp
+            
+            # 3. Nova placa térmica com termo fonte espacialmente correto
+            placa_modificada = PlacaTermica(
+                Lx=Lx, Ly=Ly, Nx=Nx, Ny=Ny, k=0.25, R=0.0025,
+                fonte_calor=fonte_total
+            )
+            placa_modificada.resolver_circulo(Tc=35, mode='sparse')
+            
+            # 4. Extração de resultados
+            interpolador = placa_modificada.criar_interpolador('linear')
+            
+            x_g = np.linspace(0.0, Lx, Nx)
+            y_g = np.linspace(0.0, Ly, Ny)
+            Xs, Ys = np.meshgrid(x_g, y_g, indexing='ij')
+            pts_all = np.column_stack([Xs.ravel(), Ys.ravel()])
+            T_all = interpolador(pts_all)
+            
+            T_max = np.max(T_all)
+            temperaturas_maximas[dist].append((S0, T_max))
+            
+            # --- MAPA DE CONTORNO BI-DIMENSIONAL ---
+            fig, ax = plt.subplots(figsize=(8, 3.8))
+            T_grid = T_all.reshape(Nx, Ny)
+            cont = ax.contourf(Xs, Ys, T_grid, 20, cmap='jet')
+            ax.contour(Xs, Ys, T_grid, 20, colors='k', linewidths=0.2)
+            ax.set_aspect('equal')
+            ax.set_title(f'Mapa de Temperatura: {dist.capitalize()} (S0 = {S0:+.1e})')
+            ax.set_xlabel('X (m)')
+            ax.set_ylabel('Y (m)')
+            plt.colorbar(cont, ax=ax, label='Temperatura (°C)')
+            plt.tight_layout()
+            plt.show()
+            
+            # --- EXTRAÇÃO DOS PERFIS UNIDIMENSIONAIS ---
+            x_perf = np.linspace(0.0, Lx, 300)
+            y_perf = np.ones_like(x_perf) * (Ly / 2.0)
+            T_horiz = interpolador(np.column_stack([x_perf, y_perf]))
+            perfis_horizontais.append((S0, T_horiz))
+            
+            y_perf_v = np.linspace(0.0, Ly, 300)
+            x_perf_v = np.ones_like(y_perf_v) * (Lx / 2.0)
+            T_vert = interpolador(np.column_stack([x_perf_v, y_perf_v]))
+            perfis_verticais.append((S0, T_vert))
+            
+        # --- PLOT COMPARATIVO DOS PERFIS DA DISTRIBUIÇÃO ---
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        
+        for S0, T_h in perfis_horizontais:
+            ax1.plot(x_perf, T_h, label=f'S0 = {S0:+.1e}')
+        ax1.set_title(f'Perfis Horizontais (y = Ly/2) - {dist.capitalize()}')
+        ax1.set_xlabel('Posição X (m)')
+        ax1.set_ylabel('Temperatura (°C)')
+        ax1.legend()
+        ax1.grid(True)
+        
+        for S0, T_v in perfis_verticais:
+            ax2.plot(T_v, y_perf_v, label=f'S0 = {S0:+.1e}')
+        ax2.set_title(f'Perfis Verticais (x = Lx/2) - {dist.capitalize()}')
+        ax2.set_xlabel('Temperatura (°C)')
+        ax2.set_ylabel('Posição Y (m)')
+        ax2.legend()
+        ax2.grid(True)
+        
+        plt.tight_layout()
+        plt.show()
 
-    ap = p - a
-
-    t = np.dot(ap, ab) / np.dot(ab, ab)
-
-    t = np.clip(t, 0.0, 1.0)
-
-    proj = a + t * ab
-
-    return np.linalg.norm(p - proj)
-
-    ########################################################################
-    # MAPA DE PROXIMIDADE
-    ########################################################################
-
-def criar_mapa_proximidade(
-    self,
-    dmax
-):
-     mapa = {}
-
-    Nx = self.placa.Nx
-    Ny = self.placa.Ny
-
-    for i in range(Nx):
-
-        for j in range(Ny):
-
-            kglobal = i + j * Nx
-
-            x = self.placa.X[i, j]
-            y = self.placa.Y[i, j]
-
-            p = np.array([x, y])
-
-            vizinhos = []
-
-            for edge_id, (n1, n2) in enumerate(
-                self.rede.conectividade
-            ):
-
-                a = self.rede.posicoes_nos[n1]
-                b = self.rede.posicoes_nos[n2]
-
-                d = self.distancia_ponto_segmento(
-                    p,
-                    a,
-                    b
-                )
-
-                    ################################################################
-                    # SE A DISTÂNCIA FOR MENOR QUE dmax
-                    # O CANAL INFLUENCIA O PONTO
-                    ################################################################
-
-                if d < dmax:
-
-                    vizinhos.append(
-                        (edge_id, d)
-                    )
-
-            mapa[kglobal] = vizinhos
-
-    return mapa
-
-    ########################################################################
-    # CONDUTIVIDADE MODIFICADA
-    ########################################################################
-
-def k_interface(
-    self,
-    p,
-    mapa
-):
-    Nx = self.placa.Nx
-    Ny = self.placa.Ny
-
-    dx = self.placa.dx
-    dy = self.placa.dy
-
-    x, y = p
-
-        ####################################################################
-        # CONVERTE COORDENADA FÍSICA EM ÍNDICE DA MALHA
-        ####################################################################
-
-    i = int(round(x / dx))
-    j = int(round(y / dy))
-
-    i = np.clip(i, 0, Nx - 1)
-    j = np.clip(j, 0, Ny - 1)
-
-    kglobal = i + j * Nx
-
-        ####################################################################
-        # PEGA TODOS OS CANAIS PRÓXIMOS
-        ####################################################################
-
-    vizinhos = mapa[kglobal]
-
-        ####################################################################
-        # SOMA AS CONTRIBUIÇÕES DAS DISTÂNCIAS
-        ####################################################################
-
-    soma = 0.0
-
-    for edge_id, d in vizinhos:
-
-        soma += 1.0 / (1.0 + d)
-
-        ####################################################################
-        # CONDUTIVIDADE MODIFICADA
-        ####################################################################
-
-    return self.placa.k * (
-        1.0 + soma
-    )
-
-    ########################################################################
-    # INICIALIZA O MAPA DE PROXIMIDADE
-    ########################################################################
-
-def inicializar_proximidade(
-    self,
-    dmax
-):
-    self.mapa_proximidade = (
-        self.criar_mapa_proximidade(
-            dmax
-        )
-    )
+    print("\n" + "="*60)
+    print("      TABELA COMPARATIVA DE TEMPERATURAS MÁXIMAS OBTIDAS")
+    print("="*60)
+    for dist in distribuicoes:
+        print(f"\nDistribuição: {dist.upper()}")
+        print(f"{'Intensidade S0':<15} | {'Temperatura Máxima (°C)':<25}")
+        print("-"*45)
+        for S0, T_max in temperaturas_maximas[dist]:
+            print(f"{S0:+.1e}        | {T_max:.4f} °C")
+    print("="*60)
 
 
-
+if __name__ == "__main__":
+    ex_2_extra()
