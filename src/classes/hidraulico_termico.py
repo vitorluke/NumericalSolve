@@ -458,13 +458,13 @@ def ex_4_acoplamento():
                 'Método': metodo,
                 'Subdivisões': n_sub,
                 'P_max (Pa)': sistema.rede.pressao.max(),
-                'Potência (W)': sistema.rede.calcular_potencia(),
+                'Potência (mW)': sistema.rede.calcular_potencia()/1000,
                 'Tempo_Medio (s)': np.mean(tempos)
             })
 
     # Formatação limpa do DataFrame
     df = pd.DataFrame(resultados)
-    #pd.options.display.float_format = '{:.6e}'.format
+    pd.options.display.float_format = '{:.7e}'.format
     print("\n" + df.to_string(index=False))
 
     # Visualização final focada na malha mais refinada
