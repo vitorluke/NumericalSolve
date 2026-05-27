@@ -189,9 +189,11 @@ class PlacaTermica:
                     data.extend([4.0 * k, -k, -k, -k, -k])
 
                     if isinstance(self.fonte_calor, np.ndarray):
-                        self.b[ic] = (self.ds) * self.fonte_calor.ravel()[ic]
+                        valor_fonte = self.fonte_calor[j, i]
                     else:
-                        self.b[ic] = (self.ds) * self.fonte_calor
+                        valor_fonte = self.fonte_calor
+                            
+                    self.b[ic] = (self.ds) * valor_fonte
 
         self.A = sparse.csr_matrix((data, (rows, cols)), shape=(self.N_total, self.N_total))
 

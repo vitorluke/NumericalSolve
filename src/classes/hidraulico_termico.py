@@ -20,6 +20,8 @@ class HidraulicoTermico:
             fonte_calor=5e5
         )
         self.rede = RedeHidraulica(levels=3)
+        kx, ky = self.calcular_k_faces(dmax=0.001)
+        self.placa.T = self.resolver_sistema_ex1(kx, ky, Tc=35.0)
 
     # =======================================================================
     # MÉTODOS ORIGINAIS MANTIDOS (Viscosidade, Integração, etc.)
@@ -31,12 +33,163 @@ class HidraulicoTermico:
     def distancia_ponto_segmento(self, p, a, b):
         ab = b - a
         ap = p - a
+        ab_len_sq = np.dot(ab, ab)
+        
+        if ab_len_sq == 0.0:
+            return np.linalg.norm(ap)
+        
         t = np.dot(ap, ab) / np.dot(ab, ab)
         t = np.clip(t, 0.0, 1.0)
+        
+
         proj = a + t * ab
         return np.linalg.norm(p - proj)
 
     # ... [MANTENHA AQUI SEUS MÉTODOS DE INTEGRAÇÃO DE LINHA E PLOTAGEM] ...
+
+    def integrar_linha(self, p0, p1, func, metodo='trapezio', n_sub=100):
+        if metodo == 'monte_carlo':
+            ts = np.random.uniform(0.0, 1.0, n_sub)
+            pts = (1.0 - ts[:, None]) * p0 + ts[:, None] * p1
+            valores = func(pts)
+            return np.mean(valores)
+        
+        if metodo == 'ponto_medio':
+            ts = np.linspace(0.5 / n_sub, 1.0 - 0.5 / n_sub, n_sub)
+            pts = (1.0 - ts[:, None]) * p0 + ts[:, None] * p1
+            valores = func(pts)
+            return np.mean(valores)
+
+        if metodo == 'trapezio':
+            ts = np.linspace(0.0, 1.0, n_sub + 1)
+            pts = (1.0 - ts[:, None]) * p0 + ts[:, None] * p1
+            valores = func(pts)
+            return (np.sum(valores) - 0.5 * (valores[0] + valores[-1])) / n_sub
+
+        raise ValueError()
+
+    def temperatura_media_aresta(self, i, j, interpolador, metodo='trapezio', n_sub=100):
+        p0 = self.rede.posicoes_nos[i]
+        p1 = self.rede.posicoes_nos[j]
+        
+        def func_T(pts):
+            return interpolador(pts).ravel()
+            
+        return self.integrar_linha(p0, p1, func_T, metodo, n_sub)
+
+    def viscosidade_efetiva_aresta(self, i, j, interpolador, metodo='trapezio', n_sub=100):
+        p0 = self.rede.posicoes_nos[i]
+        p1 = self.rede.posicoes_nos[j]
+        
+        def func_mu(pts):
+            T_vals = interpolador(pts).ravel()
+            return self.calcular_viscosidade(T_vals)
+            
+        return self.integrar_linha(p0, p1, func_mu, metodo, n_sub)
+
+    def temperaturas_medias_arestas(self, metodo='trapezio', n_sub=100, interp='linear'):
+        interpolador = self.placa.criar_interpolador(interp)
+        temperaturas = []
+        inicio = time.perf_counter()
+
+        for i, j in self.rede.conectividade:
+            T_med = self.temperatura_media_aresta(i, j, interpolador, metodo, n_sub)
+            temperaturas.append(T_med)
+
+        fim = time.perf_counter()
+        return np.array(temperaturas), fim - inicio
+
+    def viscosidades_medias_arestas(self, metodo='trapezio', n_sub=100, interp='linear'):
+        interpolador = self.placa.criar_interpolador(interp)
+        viscosidades = []
+        inicio = time.perf_counter()
+
+        for i, j in self.rede.conectividade:
+            mu_efetiva = self.viscosidade_efetiva_aresta(i, j, interpolador, metodo, n_sub)
+            viscosidades.append(mu_efetiva)
+
+        fim = time.perf_counter()
+        return np.array(viscosidades), fim - inicio
+
+    def plotar_dados_arestas(self, valores, label='Valor'):
+        coord = self.rede.posicoes_nos
+        edges = self.rede.conectividade
+        fig, ax = plt.subplots(figsize=(10, 5))
+        cmap = plt.get_cmap('jet')
+        norm = plt.Normalize(valores.min(), valores.max())
+
+        for k, (i, j) in enumerate(edges):
+            x1, y1 = coord[i]
+            x2, y2 = coord[j]
+            cor = cmap(norm(valores[k]))
+            ax.plot([x1, x2], [y1, y2], color=cor, linewidth=3)
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        plt.colorbar(sm, ax=ax, label=label)
+        ax.set_aspect('equal')
+        plt.show()
+
+    def temperaturas_nos(self, method='linear'):
+        coords = self.rede.posicoes_nos
+        interpolador = self.placa.criar_interpolador(method)
+        return interpolador(coords)
+
+    def plotar_rede_termica(self, method='linear'):
+        temperaturas = self.temperaturas_nos(method)
+        coord = self.rede.posicoes_nos
+        edges = self.rede.conectividade
+        fig, ax = plt.subplots(figsize=(10, 8))
+
+        for (i, j) in edges:
+            x1, y1 = coord[i]
+            x2, y2 = coord[j]
+            ax.plot([x1, x2], [y1, y2], color='black', linewidth=1.5, zorder=1)
+
+        scatter = ax.scatter(
+            coord[:, 0],
+            coord[:, 1],
+            c=temperaturas,
+            cmap='jet',
+            s=250,
+            edgecolors='black',
+            zorder=2
+        )
+
+        for idx, (x, y) in enumerate(coord):
+            ax.text(x, y, f'{idx+1}', ha='center', va='center', fontweight='bold', color='white')
+
+        plt.colorbar(scatter, ax=ax, label='Temperatura (°C)')
+        ax.set_aspect('equal')
+        ax.set_title(f'Temperatura nos nós ({method})')
+        plt.show()
+
+    def mapa_contorno_grade_secundaria(self, Nx_sec, Ny_sec, method='linear'):
+        x_sec = np.linspace(0.0, self.placa.Lx, Nx_sec)
+        y_sec = np.linspace(0.0, self.placa.Ly, Ny_sec)
+        Xs, Ys = np.meshgrid(x_sec, y_sec, indexing='ij')
+        pts = np.column_stack([Xs.ravel(), Ys.ravel()])
+        interpolador = self.placa.criar_interpolador(method)
+        T_sec = interpolador(pts).reshape(Nx_sec, Ny_sec)
+        
+        fig, ax = plt.subplots(figsize=(8, 4))
+        cont = ax.contourf(Xs, Ys, T_sec, 20, cmap='jet')
+        ax.contour(Xs, Ys, T_sec, 20, colors='k', linewidths=0.3)
+        ax.set_aspect('equal')
+        ax.set_title(f'Interpolação {method} ({Nx_sec}x{Ny_sec})')
+        plt.colorbar(cont, ax=ax)
+        plt.show()
+
+    def atualizar_condutancias_ex4(self, metodo='trapezio', n_sub=100):
+        T_med, _ = self.temperaturas_medias_arestas(metodo=metodo, n_sub=n_sub)
+        viscosidades = self.calcular_viscosidade(T_med)
+        self.rede.atualizar_condutancias(viscosidades)
+        self.rede.resolver()
+        return T_med
+    def atualizar_condutancias_ex5(self, metodo='trapezio', n_sub=100):
+        viscosidades_efetivas, _ = self.viscosidades_medias_arestas(metodo=metodo, n_sub=n_sub)
+        self.rede.atualizar_condutancias(viscosidades_efetivas)
+        self.rede.resolver()
+        return viscosidades_efetivas
 
     # =======================================================================
     # NOVA ARQUITETURA: VOLUMES FINITOS PARA O EXERCÍCIO 1
@@ -44,51 +197,65 @@ class HidraulicoTermico:
 
     def calcular_k_faces(self, dmax):
         """
-        Calcula a condutividade modificada exatamente nas FACES entre os nós,
-        garantindo a conservação correta do fluxo de calor.
+        Calcula a condutividade modificada exatamente nas FACES entre os nós.
+        [VERSÃO VETORIZADA: Milhares de vezes mais rápida]
         """
         Nx, Ny = self.placa.Nx, self.placa.Ny
         dx = self.placa.Lx / (Nx - 1)
         dy = self.placa.Ly / (Ny - 1)
         k_base = self.placa.k
 
-        # kx_faces: avaliado no ponto médio entre (i,j) e (i+1,j)
         kx_faces = np.full((Nx - 1, Ny), k_base)
-        # ky_faces: avaliado no ponto médio entre (i,j) e (i,j+1)
         ky_faces = np.full((Nx, Ny - 1), k_base)
+
+        # ---------------------------------------------------------
+        # PRE-COMPUTAÇÃO DOS VETORES DAS ARESTAS (Matador de lentidão)
+        # ---------------------------------------------------------
+        edges = np.array(self.rede.conectividade)
+        A = self.rede.posicoes_nos[edges[:, 0]]  # Pontos iniciais de todas as arestas
+        B = self.rede.posicoes_nos[edges[:, 1]]  # Pontos finais de todas as arestas
+        AB = B - A
+        AB_len_sq = np.sum(AB**2, axis=1)
+        
+        # Evita divisão por zero se houver arestas de tamanho zero na malha
+        valid = AB_len_sq > 0
 
         # 1. Varredura nas faces horizontais (X)
         for i in range(Nx - 1):
             for j in range(Ny):
-                px = (i + 0.5) * dx # Ponto médio em x
-                py = j * dy         # Alinhado com o nó em y
-                p = np.array([px, py])
+                px = (i + 0.5) * dx
+                py = j * dy
+                P = np.array([px, py])
                 
-                soma = 0.0
-                for n1, n2 in self.rede.conectividade:
-                    a = self.rede.posicoes_nos[n1]
-                    b = self.rede.posicoes_nos[n2]
-                    d = self.distancia_ponto_segmento(p, a, b)
-                    if d < dmax:
-                        # CORREÇÃO: Fórmula com normalização (d / dmax)
-                        soma += 1.0 / (1.0 + (d / dmax))
-                kx_faces[i, j] = k_base * (1.0 + soma)
+                # Cálculo vetorizado da distância do ponto P para TODAS as arestas
+                AP = P - A
+                t = np.zeros(len(edges))
+                t[valid] = np.sum(AP[valid] * AB[valid], axis=1) / AB_len_sq[valid]
+                t = np.clip(t, 0.0, 1.0)
+                proj = A + t[:, np.newaxis] * AB
+                d = np.linalg.norm(P - proj, axis=1)
+                
+                # Aplica a máscara e soma apenas os que estão dentro do dmax
+                mask = d < dmax
+                kx_faces[i, j] = k_base * (1.0 + np.sum(1.0 / (1.0 + (d[mask] / dmax))))
 
         # 2. Varredura nas faces verticais (Y)
         for i in range(Nx):
             for j in range(Ny - 1):
-                px = i * dx         # Alinhado com o nó em x
-                py = (j + 0.5) * dy # Ponto médio em y
-                p = np.array([px, py])
+                px = i * dx
+                py = (j + 0.5) * dy
+                P = np.array([px, py])
                 
-                soma = 0.0
-                for n1, n2 in self.rede.conectividade:
-                    a = self.rede.posicoes_nos[n1]
-                    b = self.rede.posicoes_nos[n2]
-                    d = self.distancia_ponto_segmento(p, a, b)
-                    if d < dmax:
-                        soma += 1.0 / (1.0 + (d / dmax))
-                ky_faces[i, j] = k_base * (1.0 + soma)
+                # Cálculo vetorizado
+                AP = P - A
+                t = np.zeros(len(edges))
+                t[valid] = np.sum(AP[valid] * AB[valid], axis=1) / AB_len_sq[valid]
+                t = np.clip(t, 0.0, 1.0)
+                proj = A + t[:, np.newaxis] * AB
+                d = np.linalg.norm(P - proj, axis=1)
+                
+                mask = d < dmax
+                ky_faces[i, j] = k_base * (1.0 + np.sum(1.0 / (1.0 + (d[mask] / dmax))))
 
         return kx_faces, ky_faces
 
@@ -265,7 +432,7 @@ def ex_3_acoplamento():
 
 def ex_4_acoplamento():
     print("\n--- EXERCÍCIO 4: ANÁLISE DE CONVERGÊNCIA ---")
-    malhas = [(61, 31), (121, 61), (241, 121)]
+    malhas = [(31, 15), (121, 61), (241, 121)]
     configuracoes = [('ponto_medio', 10), ('trapezio', 10), ('trapezio', 100)]
 
     resultados = []
