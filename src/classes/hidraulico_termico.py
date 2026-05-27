@@ -162,12 +162,181 @@ class HidraulicoTermico:
         self.rede.atualizar_condutancias(viscosidades)
         self.rede.resolver()
         return T_med
+    def distancia_ponto_segmento(
+     self,
+     p,
+    a,
+    b
+    ):
+        ab = b - a
+
+        ap = p - a
+
+        t = np.dot(ap, ab) / np.dot(ab, ab)
+
+        t = np.clip(t, 0.0, 1.0)
+
+        proj = a + t * ab
+
+        return np.linalg.norm(p - proj)
+
+        ########################################################################
+        # MAPA DE PROXIMIDADE
+        ########################################################################
+
+    def criar_mapa_proximidade(self, dmax):
+        mapa = {}
+        Nx = self.placa.Nx
+        Ny = self.placa.Ny
+        # Calculando o passo sem depender de atributos externos
+        dx = self.placa.Lx / (Nx - 1)
+        dy = self.placa.Ly / (Ny - 1)
+
+        for i in range(Nx):
+            for j in range(Ny):
+                kglobal = i + j * Nx
+                # CORREÇÃO: Calculando coordenadas manualmente
+                x = i * dx
+                y = j * dy
+                
+                p = np.array([x, y])
+                vizinhos = []
+
+                for edge_id, (n1, n2) in enumerate(self.rede.conectividade):
+                    a = self.rede.posicoes_nos[n1]
+                    b = self.rede.posicoes_nos[n2]
+                    d = self.distancia_ponto_segmento(p, a, b)
+                    if d < dmax:
+                        vizinhos.append((edge_id, d))
+                mapa[kglobal] = vizinhos
+        return mapa
+
+        ########################################################################
+        # CONDUTIVIDADE MODIFICADA
+        ########################################################################
+
+    def k_interface(self, p, mapa):
+        Nx = self.placa.Nx
+        Ny = self.placa.Ny
+
+        # CORREÇÃO: troquei self.placa.dx por self.placa.hx
+        # e self.placa.dy por self.placa.hy
+        dx = self.placa.hx
+        dy = self.placa.hy
+
+        x, y = p
+
+        # O restante do código permanece igual
+        i = int(round(x / dx))
+        j = int(round(y / dy))
+
+        i = np.clip(i, 0, Nx - 1)
+        j = np.clip(j, 0, Ny - 1)
+
+        kglobal = i + j * Nx
+        vizinhos = mapa[kglobal]
+
+        soma = 0.0
+        for edge_id, d in vizinhos:
+            soma += 1.0 / (1.0 + d)
+
+        return self.placa.k * (1.0 + soma)
+
+        ########################################################################
+        # INICIALIZA O MAPA DE PROXIMIDADE
+        ########################################################################
+
+    def inicializar_proximidade(
+        self,
+        dmax
+    ):
+        self.mapa_proximidade = (
+            self.criar_mapa_proximidade(
+                dmax
+            )
+        )
+    def exercicio_1_2(self):
+        dmax_list = [0.00025, 0.0005, 0.001]
+        malhas = [(61, 31), (121, 61), (241, 121)]
+        resultados = []
+
+        for Nx, Ny in malhas:
+            print(f"\n====================\nMALHA: {Nx} x {Ny}\n====================")
+            sistema = HidraulicoTermico(Nx, Ny)
+            dx = sistema.placa.Lx / (Nx - 1)
+            dy = sistema.placa.Ly / (Ny - 1)
+
+            for dmax in dmax_list:
+                print(f"\n--- dmax = {dmax} ---")
+                inicio = time.perf_counter()
+                mapa = sistema.criar_mapa_proximidade(dmax)
+                K = np.zeros((Nx, Ny))
+
+                for i in range(Nx):
+                    for j in range(Ny):
+                        # CORREÇÃO: Calculando coordenadas manualmente
+                        x = i * dx
+                        y = j * dy
+                        K[i, j] = sistema.k_interface(np.array([x, y]), mapa)
+
+                sistema.placa.k_map = K
+                sistema.placa.resolver_circulo(Tc=35, mode='sparse')
+                T = sistema.placa.T.reshape(Ny, Nx).T # Garantindo formato para o contourf
+                
+                # Plotagem ajustada para usar as coordenadas manuais
+                X_plot, Y_plot = np.meshgrid(np.linspace(0, sistema.placa.Lx, Nx), 
+                                             np.linspace(0, sistema.placa.Ly, Ny), indexing='ij')
+                
+                plt.figure(figsize=(6, 4))
+                plt.contourf(X_plot, Y_plot, T, 50, cmap='jet')
+                plt.colorbar(label="Temperatura (°C)")
+                plt.title(f"Temperatura - {Nx}x{Ny} - dmax={dmax}")
+                plt.show()
+
+                # =====================================================
+                # 4. PERFIS 1D
+                # =====================================================
+
+                # linha central vertical
+                mid_vertical = T[:, Ny // 2]
+
+                # linha central horizontal
+                mid_horizontal = T[Nx // 2, :]
+
+                plt.figure()
+                plt.plot(mid_vertical)
+                plt.title(f"Perfil horizontal (centro) {Nx}x{Ny} - dmax={dmax}")
+                plt.xlabel("y")
+                plt.ylabel("T")
+                plt.show()
+
+                plt.figure()
+                plt.plot(mid_horizontal)
+                plt.title(f"Perfil vertical (centro) {Nx}x{Ny} - dmax={dmax}")
+                plt.xlabel("x")
+                plt.ylabel("T")
+                plt.show()
+                Tmax = np.max(T)
+                tempo_total = time.perf_counter() - inicio
+
+                # =====================================================
+                # 5. ARMAZENAMENTO DOS RESULTADOS
+                # =====================================================
+                resultados.append({
+                    "malha": f"{Nx}x{Ny}",
+                    "dmax": dmax,
+                    "Tmax": Tmax,
+                    "tempo_total": tempo_total
+                })
+
+        return pd.DataFrame(resultados)
 
     def atualizar_condutancias_ex5(self, metodo='trapezio', n_sub=100):
         viscosidades_efetivas, _ = self.viscosidades_medias_arestas(metodo=metodo, n_sub=n_sub)
         self.rede.atualizar_condutancias(viscosidades_efetivas)
         self.rede.resolver()
         return viscosidades_efetivas
+    
 
     def distancia_ponto_segmento(self, p, a, b):
         ab = b - a
@@ -304,34 +473,80 @@ def ex_3_acoplamento():
 
 
 def ex_4_acoplamento():
-    print("\n--- EXERCÍCIO 4: ANÁLISE DE CONVERGÊNCIA (MALHAS E QUADRATURA) ---")
+    print("\n--- EXERCÍCIO 4: ANÁLISE DE CONVERGÊNCIA ---")
     malhas = [(61, 31), (121, 61), (241, 121)]
     configuracoes = [('ponto_medio', 10), ('trapezio', 10), ('trapezio', 100)]
     resultados = []
 
     for Nx, Ny in malhas:
+        print(f"Processando malha: {Nx}x{Ny}...")
         sistema = HidraulicoTermico(Nx, Ny)
+        
+        # Warm-up: executa uma vez sem medir para forçar alocações e aquecer o cache
+        sistema.atualizar_condutancias_ex4(metodo='trapezio', n_sub=10)
+        
         for metodo, n_sub in configuracoes:
-            inicio = time.perf_counter()
-            T_med = sistema.atualizar_condutancias_ex4(metodo=metodo, n_sub=n_sub)
-            fim = time.perf_counter()
-            
-            P_max = sistema.rede.pressao.max()
-            Pot = sistema.rede.calcular_potencia()
+            # Medição com média de 5 execuções para eliminar ruído do OS
+            tempos = []
+            for _ in range(5):
+                inicio = time.perf_counter()
+                sistema.atualizar_condutancias_ex4(metodo=metodo, n_sub=n_sub)
+                tempos.append(time.perf_counter() - inicio)
             
             resultados.append({
-                'Malha': f'{Nx}x{Ny}', 'Método': metodo, 'Subdivisões': n_sub,
-                'P_max (Pa)': P_max, 'Potência (W)': Pot, 'Tempo (s)': fim - inicio
-            })
+
+                'Malha': f'{Nx}x{Ny}',
+                'Método': metodo,
+                'Subdivisões': n_sub,
+                'P_max (Pa)': sistema.rede.pressao.max(),
+                'Potência (W)': sistema.rede.calcular_potencia(),
+                'Tempo_Medio (s)': np.mean(tempos)
+
             
+    # Formatação limpa do DataFrame
     df = pd.DataFrame(resultados)
-    print(df.to_string(index=False))
+    #pd.options.display.float_format = '{:.8e}'.format
+    print("\n" + df.to_string(index=False))
 
-    sistema_plot = HidraulicoTermico(241, 121)
-    T_med_plot = sistema_plot.atualizar_condutancias_ex4(metodo='trapezio', n_sub=100)
-    sistema_plot.plotar_dados_arestas(T_med_plot, label='Temperatura Média (°C)')
-    sistema_plot.plotar_rede_termica(method='linear')
+    # Visualização final focada na malha mais refinada
+    print("\nGerando visualização da convergência...")
+    sistema.plotar_dados_arestas(sistema.temperaturas_medias_arestas(metodo='trapezio', n_sub=100)[0], label='Temperatura Média (°C)')
+    sistema.plotar_rede_termica(method='linear')
 
+
+def ex_4_convergencia_grafica():
+    malha = (241, 121) # Fixando a malha mais refinada como referência
+    subdivisoes = [1, 2, 5, 10, 20, 50, 100]
+    
+    sistema = HidraulicoTermico(malha[0], malha[1])
+    
+    pot_pm = []
+    pot_trap = []
+    
+    print("Calculando convergência...")
+    for n in subdivisoes:
+        sistema.atualizar_condutancias_ex4(metodo='ponto_medio', n_sub=n)
+        pot_pm.append(sistema.rede.calcular_potencia())
+        
+        sistema.atualizar_condutancias_ex4(metodo='trapezio', n_sub=n)
+        pot_trap.append(sistema.rede.calcular_potencia())
+        
+    # Plotagem do Gráfico de Convergência
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    ax.plot(subdivisoes, pot_pm, marker='o', linestyle='-', color='blue', label='Ponto Médio', linewidth=2)
+    ax.plot(subdivisoes, pot_trap, marker='s', linestyle='--', color='red', label='Trapézio', linewidth=2)
+    
+    ax.set_xscale('log')
+    ax.set_xlabel('Número de Subdivisões por Aresta (escala log)')
+    ax.set_ylabel('Potência Total Dissipada (W)')
+    ax.set_title('Convergência da Potência Dissipada no Gêmeo Digital')
+    
+    # Adicionando grid para facilitar a leitura da estabilização
+    ax.grid(True, which="both", ls="--", linewidth=0.5)
+    ax.legend()
+    
+    plt.tight_layout()
 
 def ex_5_acoplamento():
     print("\n--- EXERCÍCIO 5: COMPARAÇÃO DE MODELAGEM DA VISCOSIDADE ---")
@@ -356,7 +571,6 @@ def ex_5_acoplamento():
 
     sistema.plotar_dados_arestas(viscosidades_efetivas, label='Viscosidade Efetiva')
     sistema.plotar_rede_termica(method='linear')
-
 
 def ex_2_extra():
     print("\n" + "="*50)
@@ -468,5 +682,26 @@ def ex_2_extra():
     print("="*60)
 
 
-if __name__ == "__main__":
-    ex_2_extra()
+########################################################################
+# DISTÂNCIA ENTRE PONTO E SEGMENTO
+########################################################################
+
+
+
+def ex_1_especial_acoplamento():
+    print("\n--- INICIANDO ROTINA ESPECIAL: MAPA DE PROXIMIDADE E CONDUTIVIDADE ---")
+    
+    # Instanciamos uma malha de resolução baixa apenas como gatilho para acessar o método,
+    # já que o próprio exercicio_1_2 fará a instanciação das malhas de teste internamente.
+    sistema_gatilho = HidraulicoTermico(61, 31)
+    
+    print("Iniciando varredura de malhas e cálculo de distâncias (isso pode demorar devido aos laços não-vetorizados)...")
+    
+    # Executa a rotina que gera os gráficos de contorno e perfis 1D
+    df_resultados = sistema_gatilho.exercicio_1_2()
+    
+    print("\n=======================================================")
+    print("RESULTADOS GLOBAIS: TEMPERATURA MÁXIMA vs DISTÂNCIA (dmax)")
+    print("=======================================================")
+    print(df_resultados.to_string(index=False))
+    
