@@ -240,7 +240,7 @@ class HidraulicoTermico:
         for edge_id, d in vizinhos:
             soma += 1.0 / (1.0 + d)
 
-        return self.placa.k * (1.0 + soma)
+        return self.placa.k * (1.0 + 50 * np.tanh(soma)))
 
         ########################################################################
         # INICIALIZA O MAPA DE PROXIMIDADE
