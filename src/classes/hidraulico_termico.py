@@ -501,6 +501,7 @@ def ex_4_acoplamento():
                 'P_max (Pa)': sistema.rede.pressao.max(),
                 'Potência (W)': sistema.rede.calcular_potencia(),
                 'Tempo_Medio (s)': np.mean(tempos)
+            })
 
             
     # Formatação limpa do DataFrame
