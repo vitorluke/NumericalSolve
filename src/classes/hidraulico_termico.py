@@ -420,9 +420,8 @@ def ex_2_acoplamento():
 def ex_3_acoplamento():
     acoplamento = HidraulicoTermico(241, 121)
     configs = [
-        ('monte_carlo', 10), ('monte_carlo', 100),
-        ('ponto_medio', 10), ('ponto_medio', 100),
-        ('trapezio', 1), ('trapezio', 10), ('trapezio', 100)
+        ('ponto_medio', 10), ('ponto_medio', 100), ('ponto_medio', 1000),
+        ('trapezio', 10), ('trapezio', 100), ('trapezio', 1000)
     ]
 
     for metodo, n in configs:

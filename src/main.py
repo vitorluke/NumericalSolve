@@ -159,9 +159,9 @@ def main():
 
 def main():
     #ex_2_acoplamento()
-    #ex_3_acoplamento()
-    ex_4_acoplamento()
-    #ex_5_acoplamento()
+    ex_3_acoplamento()
+    # ex_4_acoplamento()
+    # ex_5_acoplamento()
     #ex_2_extra()
     #ex_1_especial_acoplamento()
 
