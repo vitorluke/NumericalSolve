@@ -1,188 +1,308 @@
 import numpy as np
-import scipy as sp
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
 import matplotlib.pyplot as plt
+
 from src.classes.membrana_elastica import MembranaElastica
 from src.classes.rede_hidraulica import RedeHidraulica
 
-# =============================================================================
-# CONSTANTES E CONFIGURAÇÕES DO SISTEMA (CONFORME ENUNCIADO)
-# =============================================================================
-N_membrana = 51          # Densidade de malha adotada para consistência
-R_dim = 0.25e-2          # Raio: 0.25 cm
-e_dim = 0.1e-3           # Espessura: 0.1 mm
-sigma_dim = 200.0        # Tensão: 200 N/m
-rho_dim = 900.0          # Densidade: 900 kg/m^3
-mu_fluido = 5e-4         # Viscosidade do fluido
-H_k = 2000e-6            # Canais largos: 2000 µm
-beta_hat = 0.0           # Sem amortecimento intrínseco
-nout = 5
-nin = 0
+class HidraulicoMecanico:
+    def __init__(self, N_mem=51, H_k=1000e-6, beta_hat=0.1, n_levels=3):
+        """
+        Inicializa o modelo acoplado Hidráulico-Mecânico.
+        """
+        # Parâmetros Físicos Nominais
+        self.N_mem = N_mem
+        self.R_dim = 0.25e-2
+        self.e_dim = 0.1e-3
+        self.sigma = 200.0
+        self.rho = 900.0
+        self.mu = 5e-4
+        self.H_k = H_k
+        self.beta_hat = beta_hat
+        
+        # Índices Críticos da Rede
+        self.nin = 0
+        self.nout = 5
+        
+        # Inicialização das Componentes Isoladas
+        self.membrana = MembranaElastica(N=self.N_mem, R=self.R_dim)
+        self.rede = RedeHidraulica(levels=n_levels)
+        
+        self.nm = self.membrana.nunk
+        self.np_nodes = self.rede.numero_nos
+        
+        # Escalas de Adimensionalização
+        self.w0 = 0.01 * self.R_dim
+        self.pref = (self.sigma * self.w0) / (self.R_dim**2)
+        self.vref = np.sqrt(self.sigma / (self.rho * self.e_dim)) * (self.w0 / self.R_dim)
+        self.t_ref = self.R_dim * np.sqrt((self.rho * self.e_dim) / self.sigma)
+        
+        self.h_hat = 2.0 / (self.N_mem - 1)
+        
+        self._preparar_matrizes()
 
-# 1. Inicialização de objetos e cálculo de escalas
-membrana = MembranaElastica(N=N_membrana, R=R_dim)
-nm = membrana.nunk
-K = membrana.K
-M = membrana.M
-D = beta_hat * M  # Nula neste cenário
+    def _preparar_matrizes(self):
+        """
+        Ajusta propriedades, aplica condições de contorno e adimensionaliza os sistemas.
+        """
+        # 1. Recalcular Condutâncias da Rede para seção quadrada e H_k especificado
+        kappa_k = (np.pi * (self.H_k**4)) / (128 * self.mu)
+        condutancias = []
+        for (i, j) in self.rede.conectividade:
+            n1 = self.rede.posicoes_nos[i]
+            n2 = self.rede.posicoes_nos[j]
+            L_k = np.sqrt((n1[0] - n2[0])**2 + (n1[1] - n2[1])**2)
+            condutancias.append(kappa_k / L_k)
+        
+        self.rede.condutancias = np.array(condutancias)
+        self.rede.assembly()
+        
+        # A dimensional (usada puramente para cálculo de potência mecânica)
+        self.A_dim_pura = self.rede.matriz_global.copy()
+        
+        # Adimensionalização da Matriz A
+        A_scale = self.pref / (self.vref * (self.R_dim**2))
+        A_adim_array = self.A_dim_pura * A_scale
+        
+        # Condição de Dirichlet na entrada (Nó 0)
+        A_adim_array[self.nin, :] = 0.0
+        A_adim_array[self.nin, self.nin] = 1.0
+        self.A_adim = sp.csr_matrix(A_adim_array)
+        
+        # 2. Matrizes da Membrana
+        self.K = self.membrana.K
+        self.M = self.membrana.M
+        self.D = self.beta_hat * self.M
+        
+        # 3. Matriz de Acoplamento U
+        U = np.zeros((self.np_nodes, self.nm))
+        self.uns = np.ones(self.nm)
+        
+        for i in range(self.N_mem):
+            for j in range(self.N_mem):
+                idx = i + j * self.N_mem
+                x = i * self.h_hat - 1.0
+                y = j * self.h_hat - 1.0
+                dist_sq = x**2 + y**2
+                
+                # Zera nós fora do contorno circular e nas bordas rígidas quadradas
+                if dist_sq > 1.0 or i == 0 or i == self.N_mem-1 or j == 0 or j == self.N_mem-1:
+                    self.uns[idx] = 0.0
+                    
+        U[self.nout, :] = self.uns
+        self.U = sp.csr_matrix(U)
 
-rede = RedeHidraulica(levels=3)
-np_nodes = rede.numero_nos
+    def solver_transiente(self, dt_hat, t_final_hat, p_inlet_func, estado_inicial=None):
+        """
+        Resolvedor dinâmico utilizando Euler Implícito em blocos.
+        """
+        n_steps = int(t_final_hat / dt_hat)
+        idt = 1.0 / dt_hat
+        Iden = sp.identity(self.nm, format='csr')
+        
+        # Montagem do Aglob
+        blocks = [
+            [idt * Iden, -Iden, None],
+            [self.K, idt * self.M + self.D, -self.U.T],
+            [None, self.U * (self.h_hat**2), self.A_adim]
+        ]
+        Aglob = sp.bmat(blocks, format='csc')
+        solver_LU = spla.factorized(Aglob)
+        
+        if estado_inicial is None:
+            w = np.zeros(self.nm)
+            v = np.zeros(self.nm)
+            p = np.zeros(self.np_nodes)
+            t_hat = 0.0
+        else:
+            w, v, p, t_hat = estado_inicial
+            
+        hist = {'t': [], 'w_center': [], 'p_out': [], 'q_out': [], 'volume': [], 'potencia': [], 'w_full': None}
+        idx_centro = (self.N_mem // 2) + (self.N_mem // 2) * self.N_mem
+        
+        for _ in range(n_steps):
+            t_hat += dt_hat
+            p_inlet_dim = p_inlet_func(t_hat)
+            p_inlet_hat = p_inlet_dim / self.pref
+            
+            b_mec = idt * w
+            b_vel = idt * self.M.dot(v)
+            b_hid = np.zeros(self.np_nodes)
+            b_hid[self.nin] = p_inlet_hat
+            
+            b_global = np.concatenate([b_mec, b_vel, b_hid])
+            sol = solver_LU(b_global)
+            
+            w, v, p = sol[0:self.nm], sol[self.nm:2*self.nm], sol[2*self.nm:]
+            
+            # Reversão Dimensional para Histórico
+            p_out_dim = p[self.nout] * self.pref
+            q_out_dim = (self.h_hat**2) * np.sum(v * self.uns) * (self.vref * self.R_dim**2)
+            w_cen_dim = w[idx_centro] * self.w0
+            vol_dim = (self.h_hat**2) * np.sum(w * self.uns) * (self.w0 * self.R_dim**2)
+            pot_dim = (p.T @ self.A_dim_pura @ p) * (self.pref * self.vref * self.R_dim**2)
+            
+            hist['t'].append(t_hat)
+            hist['p_out'].append(p_out_dim)
+            hist['q_out'].append(q_out_dim)
+            hist['w_center'].append(w_cen_dim)
+            hist['volume'].append(vol_dim)
+            hist['potencia'].append(pot_dim)
+            
+        hist['w_full'] = w * self.w0
+        return hist, (w, v, p, t_hat)
 
-# Ajuste manual da condutância hidráulica para os canais de 2000 µm
-kappa_k = (np.pi * (H_k**4)) / (128 * mu_fluido)
-condutancias_custom = []
-for (i, j) in rede.conectividade:
-    no_1 = rede.posicoes_nos[i]
-    no_2 = rede.posicoes_nos[j]
-    L_k = np.sqrt((no_1[0] - no_2[0])**2 + (no_1[1] - no_2[1])**2)
-    condutancias_custom.append(kappa_k / L_k)
-rede.condutancias = np.array(condutancias_custom)
-rede.assembly()
-A_dim = rede.matriz_global.copy()
 
-# Fatores de Escala
-w0 = 0.01 * R_dim
-pref = (sigma_dim * w0) / (R_dim**2)
-vref = np.sqrt(sigma_dim / (rho_dim * e_dim)) * (w0 / R_dim)
-t_ref = R_dim * np.sqrt((rho_dim * e_dim) / sigma_dim)
+    # ==========================================
+    # MÉTODOS DOS EXERCÍCIOS ESPECÍFICOS
+    # ==========================================
 
-A_scale = pref / (vref * (R_dim**2))
-A_adimensional = A_dim * A_scale
-A_adimensional[nin, :] = 0.0
-A_adimensional[nin, nin] = 1.0
+    @classmethod
+    def executar_ex_01(cls):
+        print("=== Exercício 1: Estrutura da Matriz R ===")
+        # Malha reduzida solicitada
+        sistema = cls(N_mem=26)
+        
+        A_inv = np.linalg.inv(sistema.A_adim.toarray())
+        U_denso = sistema.U.toarray()
+        
+        R = (sistema.h_hat**2) * (U_denso.T @ A_inv @ U_denso)
+        
+        plt.figure(figsize=(6, 6))
+        plt.spy(R, marker=',', color='blue', precision=1e-10)
+        plt.title('Estrutura de Esparsidade da Matriz $R$ ($26 \\times 26$)')
+        plt.xlabel('Graus de Liberdade da Membrana')
+        plt.ylabel('Graus de Liberdade da Membrana')
+        plt.tight_layout()
+        plt.show()
 
-# Matriz de acoplamento U
-U = np.zeros((np_nodes, nm))
-uns = np.ones(nm)
-h_hat = 2.0 / (N_membrana - 1)
-for i in range(N_membrana):
-    for j in range(N_membrana):
-        idx = i + j * N_membrana
-        if (i*h_hat - 1.0)**2 + (j*h_hat - 1.0)**2 > 1.0 or i==0 or i==N_membrana-1 or j==0 or j==N_membrana-1:
-            uns[idx] = 0.0
-U[nout, :] = uns
-U_sparse = sp.sparse.csr_matrix(U)
+    @classmethod
+    def executar_ex_02(cls):
+        print("=== Exercício 2: Enchimento/Pressurização ===")
+        sistema = cls(N_mem=51, H_k=1000e-6, beta_hat=0.1)
+        
+        # Pressão Degrau de 10kPa
+        def p_in(t): return 10000.0
+        
+        hist, estado_final = sistema.solver_transiente(dt_hat=0.025, t_final_hat=12.0, p_inlet_func=p_in)
+        cls._plotar_6_graficos(hist, "Exercício 2: Resposta ao Degrau de Pressão (10 kPa)")
+        
+        return estado_final
 
-# =============================================================================
-# EXTRAÇÃO DO TERCEIRO MODO FUNDAMENTAL DA MEMBRANA ISOLADA
-# =============================================================================
-freqs_dim, omegas_dim, modes = membrana.solve_modes(nmodes=10)
-freqs_hat, omegas_hat, _ = membrana.solve_modes_adimensional(nmodes=10)
+    @classmethod
+    def executar_ex_03(cls, estado_inicial_ex2):
+        print("=== Exercício 3: Relaxação Instântanea ===")
+        sistema = cls(N_mem=51, H_k=1000e-6, beta_hat=0.1)
+        
+        # Pressão Cai para Zero
+        def p_in(t): return 0.0
+        
+        hist, _ = sistema.solver_transiente(dt_hat=0.025, t_final_hat=12.0, p_inlet_func=p_in, estado_inicial=estado_inicial_ex2)
+        cls._plotar_6_graficos(hist, "Exercício 3: Relaxação (Pressão Inlet = 0)")
 
-# O terceiro modo válido (índice 2 devido à ordenação dos autovalores estáveis)
-freq_isolada_3 = freqs_dim[2]
-omega_hat_3 = omegas_hat[2]
-modo_3_direcional = modes[:, 2]
+    @classmethod
+    def executar_ex_04(cls):
+        print("=== Exercício 4: Oscilação Livre do 3º Modo ===")
+        # Sem amortecimento intrínseco e canais largos
+        sistema = cls(N_mem=51, H_k=2000e-6, beta_hat=0.0)
+        
+        # Obter o 3º Modo
+        freqs, omegas, modos = sistema.membrana.solve_modes_adimensional(nmodes=10)
+        w3_hat = omegas[2] # 3º modo analítico
+        modo_3 = modos[:, 2]
+        
+        print(f"Frequência Isolada da Membrana (Adimensional w3): {w3_hat:.4f}")
+        
+        # Condição inicial customizada
+        w_init = (modo_3 / np.max(np.abs(modo_3))) * 0.1
+        estado_zero = (w_init, np.zeros(sistema.nm), np.zeros(sistema.np_nodes), 0.0)
+        
+        def p_in(t): return 0.0
+        
+        hist, _ = sistema.solver_transiente(dt_hat=0.01, t_final_hat=30.0, p_inlet_func=p_in, estado_inicial=estado_zero)
+        
+        # Encontrar frequência observada via cruzamento por zero
+        w_c = np.array(hist['w_center'])
+        zeros = np.where(np.diff(np.sign(w_c - np.mean(w_c))))[0]
+        if len(zeros) >= 2:
+            periodo = 2 * np.mean(np.diff(np.array(hist['t'])[zeros]))
+            freq_obs = (2 * np.pi) / periodo
+            print(f"Frequência Acoplada Observada (Adimensional): {freq_obs:.4f}")
+        
+        fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+        ax[0].plot(hist['t'], hist['w_center'], color='green')
+        ax[0].set(title="Ex 4: Deflexão Central", xlabel="Tempo $\hat{t}$", ylabel="$w$ (m)")
+        ax[0].grid(True)
+        
+        ax[1].plot(hist['t'], hist['p_out'], color='darkgreen')
+        ax[1].set(title="Ex 4: Pressão de Saída", xlabel="Tempo $\hat{t}$", ylabel="$p$ (Pa)")
+        ax[1].grid(True)
+        plt.tight_layout()
+        plt.show()
+        
+        return w3_hat
 
-print(f"--- Dados do 3º Modo da Membrana Isolada ---")
-print(f"Frequência Linear Analítica/Isolada: {freq_isolada_3:.2f} Hz")
-print(f"Frequência Angular Adimensional (w3_hat): {omega_hat_3:.4f}")
+    @classmethod
+    def executar_ex_05(cls, w3_hat):
+        print("=== Exercício 5: Ressonância Harmônica ===")
+        sistema = cls(N_mem=51, H_k=2000e-6, beta_hat=0.0)
+        
+        # Excitação Harmônica na Frequência Natural
+        def p_in(t): return 5000.0 * np.cos(w3_hat * t)
+        
+        hist, _ = sistema.solver_transiente(dt_hat=0.01, t_final_hat=30.0, p_inlet_func=p_in)
+        
+        fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+        ax[0].plot(hist['t'], hist['w_center'], color='blue')
+        ax[0].set(title="Ex 5: Ressonância (Deflexão)", xlabel="Tempo $\hat{t}$", ylabel="$w$ (m)")
+        ax[0].grid(True)
+        
+        ax[1].plot(hist['t'], hist['p_out'], color='red')
+        ax[1].set(title="Ex 5: Pressão Transiente", xlabel="Tempo $\hat{t}$", ylabel="$p$ (Pa)")
+        ax[1].grid(True)
+        plt.tight_layout()
+        plt.show()
 
-# =============================================================================
-# EXERCÍCIO 4: Oscilação Livre a partir do 3º Modo
-# =============================================================================
-print("\nSimulando Exercício 4 (Oscilação Livre)...")
-dt_hat = 0.01
-t_final_hat = 30.0  # Tempo longo o suficiente para visualizar o amortecimento hidráulico
-n_steps = int(t_final_hat / dt_hat)
+    @staticmethod
+    def _plotar_6_graficos(hist, titulo_principal):
+        fig, axs = plt.subplots(2, 3, figsize=(16, 8))
+        fig.suptitle(titulo_principal, fontsize=14, fontweight='bold')
+        
+        axs[0, 0].plot(hist['t'], hist['p_out'], color='blue')
+        axs[0, 0].set(title='$p_{outlet}$', xlabel='$\hat{t}$', ylabel='Pa')
+        axs[0, 0].grid(True)
+        
+        axs[0, 1].plot(hist['t'], hist['q_out'], color='orange')
+        axs[0, 1].set(title='$q_{outlet}$ (Vazão)', xlabel='$\hat{t}$', ylabel='$m^3/s$')
+        axs[0, 1].grid(True)
+        
+        axs[0, 2].plot(hist['t'], hist['w_center'], color='green')
+        axs[0, 2].set(title='Deflexão Central', xlabel='$\hat{t}$', ylabel='m')
+        axs[0, 2].grid(True)
+        
+        axs[1, 0].plot(hist['t'], hist['volume'], color='purple')
+        axs[1, 0].set(title='Volume Reservatório', xlabel='$\hat{t}$', ylabel='$m^3$')
+        axs[1, 0].grid(True)
+        
+        axs[1, 1].plot(hist['t'], hist['potencia'], color='red')
+        axs[1, 1].set(title='Potência Consumida', xlabel='$\hat{t}$', ylabel='Watts')
+        axs[1, 1].grid(True)
+        
+        X_m, Y_m = np.meshgrid(np.linspace(0, 0.5, int(np.sqrt(len(hist['w_full'])))), 
+                               np.linspace(0, 0.5, int(np.sqrt(len(hist['w_full'])))))
+        im = axs[1, 2].contourf(X_m, Y_m, hist['w_full'].reshape(X_m.shape), 20, cmap='viridis')
+        fig.colorbar(im, ax=axs[1, 2], label='m')
+        axs[1, 2].set(title='Perfil Final da Membrana')
+        axs[1, 2].set_aspect('equal')
+        
+        plt.tight_layout()
+        plt.show()
 
-# Condição Inicial: Deslocamento moldado pelo 3º modo (normalizado com amplitude pequena de 0.1)
-w_current = (modo_3_direcional / np.max(np.abs(modo_3_direcional))) * 0.1
-v_current = np.zeros(nm)
-p_current = np.zeros(np_nodes)
-
-# Estrutura do resolvedor Euler Implícito
-idt = 1.0 / dt_hat
-Iden = sp.sparse.identity(nm, format='csr')
-blocks = [[idt * Iden, -Iden, None], [K, idt * M + D, -U_sparse.T], [None, U_sparse * (h_hat**2), A_adimensional]]
-Aglob_LU = sp.sparse.linalg.splu(sp.sparse.bmat(blocks, format='csr'))
-
-hist_ex4 = {'t': [], 'w_center': [], 'p_outlet': []}
-idx_centro = (N_membrana // 2) + (N_membrana // 2) * N_membrana
-
-for step in range(n_steps):
-    t_hat = (step + 1) * dt_hat
-    RHS_1 = idt * w_current
-    RHS_2 = idt * M.dot(v_current)
-    RHS_3 = np.zeros(np_nodes) # p_inlet = 0
-    
-    sol = Aglob_LU.solve(np.concatenate([RHS_1, RHS_2, RHS_3]))
-    w_current, v_current, p_current = sol[0:nm], sol[nm:2*nm], sol[2*nm:]
-    
-    hist_ex4['t'].append(t_hat * t_ref)  # Tempo dimensionalizado para análise de frequência
-    hist_ex4['w_center'].append(w_current[idx_centro] * w0)
-    hist_ex4['p_outlet'].append(p_current[nout] * pref)
-
-# Cálculo da Frequência Acoplada observada (via cruzamentos por zero do deslocamento central)
-w_central_arr = np.array(hist_ex4['w_center'])
-zero_crossings = np.where(np.diff(np.sign(w_central_arr - np.mean(w_central_arr))))[0]
-if len(zero_crossings) > 2:
-    tempos_cruzamento = np.array(hist_ex4['t'])[zero_crossings]
-    periodo_dimensional = 2 * np.mean(np.diff(tempos_cruzamento))
-    freq_acoplada_obs = 1.0 / periodo_dimensional
-else:
-    freq_acoplada_obs = np.nan
-
-print(f"Frequência Observada no Sistema Acoplado: {freq_acoplada_obs:.2f} Hz")
-
-# =============================================================================
-# EXERCÍCIO 5: Carregamento Harmônico / Forçamento (Ressonância)
-# =============================================================================
-print("\nSimulando Exercício 5 (Forçamento Harmônico)...")
-w_current = np.zeros(nm)   # Inicializa em repouso
-v_current = np.zeros(nm)
-p_current = np.zeros(np_nodes)
-
-hist_ex5 = {'t_hat': [], 'w_center': [], 'p_outlet': []}
-
-for step in range(n_steps):
-    t_hat = (step + 1) * dt_hat
-    
-    # Pressão forçante na entrada: 5000 * cos(w3 * t)
-    p_inlet_dim = 5000.0 * np.cos(omega_hat_3 * t_hat)
-    p_inlet_hat = p_inlet_dim / pref
-    
-    RHS_1 = idt * w_current
-    RHS_2 = idt * M.dot(v_current)
-    RHS_3 = np.zeros(np_nodes)
-    RHS_3[nin] = p_inlet_hat
-    
-    sol = Aglob_LU.solve(np.concatenate([RHS_1, RHS_2, RHS_3]))
-    w_current, v_current, p_current = sol[0:nm], sol[nm:2*nm], sol[2*nm:]
-    
-    hist_ex5['t_hat'].append(t_hat)
-    hist_ex5['w_center'].append(w_current[idx_centro] * w0)
-    hist_ex5['p_outlet'].append(p_current[nout] * pref)
-
-# =============================================================================
-# PLOTAGEM DOS GRÁFICOS RESULTANTES
-# =============================================================================
-fig, axs = plt.subplots(2, 2, figsize=(14, 10))
-fig.suptitle('Análise Dinâmica e Vibracional (Exercícios 4 e 5)', fontsize=16, fontweight='bold')
-
-# Ex 4: Decaimento e oscilação livre do ponto central
-axs[0, 0].plot(hist_ex4['t'], hist_ex4['w_center'], 'g-')
-axs[0, 0].set_title('Exercício 4: Deflexão Central (Oscilação Livre)')
-axs[0, 0].set(xlabel='Tempo (s)', ylabel='Deslocamento $w_{center}$ (m)')
-axs[0, 0].grid(True)
-
-# Ex 4: Resposta de Pressão no Outlet decorrente da oscilação livre
-axs[0, 1].plot(hist_ex4['t'], hist_ex4['p_outlet'], 'darkgreen')
-axs[0, 1].set_title('Exercício 4: Pressão de Saída $p_{outlet}$')
-axs[0, 1].set(xlabel='Tempo (s)', ylabel='Pressão (Pa)')
-axs[0, 1].grid(True)
-
-# Ex 5: Resposta harmônica mostrando o batimento/crescimento de ressonância
-axs[1, 0].plot(hist_ex5['t_hat'], hist_ex5['w_center'], 'b-')
-axs[1, 0].set_title('Exercício 5: Resposta Harmônica (Ressonância em $\omega_3$)')
-axs[1, 0].set(xlabel='Tempo Adimensional $\hat{t}$', ylabel='Deslocamento $w_{center}$ (m)')
-axs[1, 0].grid(True)
-
-# Ex 5: Evolução da pressão transiente sob forçamento senoidal
-axs[1, 1].plot(hist_ex5['t_hat'], hist_ex5['p_outlet'], 'r-')
-axs[1, 1].set_title('Exercício 5: Histórico de Pressão $p_{outlet}(t)$')
-axs[1, 1].set(xlabel='Tempo Adimensional $\hat{t}$', ylabel='Pressão $p_{outlet}$ (Pa)')
-axs[1, 1].grid(True)
-
-plt.tight_layout()
-plt.show()
+if __name__ == "__main__":
+    # Execução sequencial encapsulada
+    HidraulicoMecanico.executar_ex_01()
+    estado_ex2 = HidraulicoMecanico.executar_ex_02()
+    HidraulicoMecanico.executar_ex_03(estado_ex2)
+    w3_hat = HidraulicoMecanico.executar_ex_04()
+    HidraulicoMecanico.executar_ex_05(w3_hat)
