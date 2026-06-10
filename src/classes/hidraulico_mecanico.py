@@ -93,7 +93,7 @@ class HidraulicoMecanico:
         U[self.nout, :] = self.uns
         self.U = sp.csr_matrix(U)
 
-    def solver_transiente(self, dt_hat, t_final_hat, p_inlet_func, estado_inicial=None):
+    def solver_transiente(self, dt_hat, t_final_hat, p_inlet_func, estado_inicial=None, idx_monitor=None):
         """
         Resolvedor dinâmico utilizando Euler Implícito em blocos.
         """
@@ -119,7 +119,10 @@ class HidraulicoMecanico:
             w, v, p, t_hat = estado_inicial
             
         hist = {'t': [], 'w_center': [], 'p_out': [], 'q_out': [], 'volume': [], 'potencia': [], 'w_full': None}
-        idx_centro = (self.N_mem // 2) + (self.N_mem // 2) * self.N_mem
+        
+        # SE NENHUM NÓ FOR ESPECIFICADO, MONITORA O CENTRO POR PADRÃO
+        if idx_monitor is None:
+            idx_monitor = (self.N_mem // 2) + (self.N_mem // 2) * self.N_mem
         
         for _ in range(n_steps):
             t_hat += dt_hat
@@ -139,7 +142,7 @@ class HidraulicoMecanico:
             # Reversão Dimensional para Histórico
             p_out_dim = p[self.nout] * self.pref
             q_out_dim = (self.h_hat**2) * np.sum(v * self.uns) * (self.vref * self.R_dim**2)
-            w_cen_dim = w[idx_centro] * self.w0
+            w_cen_dim = w[idx_monitor] * self.w0  # MONITORANDO O NÓ DE INTERESSE
             vol_dim = (self.h_hat**2) * np.sum(w * self.uns) * (self.w0 * self.R_dim**2)
             pot_dim = (p.T @ self.A_dim_pura @ p) * (self.pref * self.vref * self.R_dim**2)
             
@@ -202,25 +205,31 @@ class HidraulicoMecanico:
         cls._plotar_6_graficos(hist, "Exercício 3: Relaxação (Pressão Inlet = 0)")
 
     @classmethod
-    def executar_ex_04(cls):
-        print("=== Exercício 4: Oscilação Livre do 3º Modo ===")
+    def executar_ex_04(cls, modo=3):
+        index_modo = modo-1
+        print(f"=== Exercício 4: Oscilação Livre do {modo}º Modo ===")
         # Sem amortecimento intrínseco e canais largos
         sistema = cls(N_mem=51, H_k=2000e-6, beta_hat=0.0)
         
         # Obter o 3º Modo
         freqs, omegas, modos = sistema.membrana.solve_modes_adimensional(nmodes=10)
-        w3_hat = omegas[2] # 3º modo analítico
-        modo_3 = modos[:, 2]
+        w3_hat = omegas[index_modo] 
+        modo_3 = modos[:, index_modo]
         
         print(f"Frequência Isolada da Membrana (Adimensional w3): {w3_hat:.4f}")
         
-        # Condição inicial customizada
+        # Condição inicial customizada (amplitude máxima de 0.1 adimensional)
         w_init = (modo_3 / np.max(np.abs(modo_3))) * 0.1
         estado_zero = (w_init, np.zeros(sistema.nm), np.zeros(sistema.np_nodes), 0.0)
         
         def p_in(t): return 0.0
         
-        hist, _ = sistema.solver_transiente(dt_hat=0.01, t_final_hat=30.0, p_inlet_func=p_in, estado_inicial=estado_zero)
+        # ENCONTRA O NÓ DE DEFLEXÃO MÁXIMA PARA CORRIGIR A ESCALA DO GRÁFICO
+        idx_max = np.argmax(np.abs(w_init))
+        
+        # Passando o idx_max para o solver monitorar
+        hist, _ = sistema.solver_transiente(dt_hat=0.01, t_final_hat=30.0, p_inlet_func=p_in, 
+                                            estado_inicial=estado_zero, idx_monitor=idx_max)
         
         # Encontrar frequência observada via cruzamento por zero
         w_c = np.array(hist['w_center'])
@@ -232,11 +241,11 @@ class HidraulicoMecanico:
         
         fig, ax = plt.subplots(1, 2, figsize=(12, 4))
         ax[0].plot(hist['t'], hist['w_center'], color='green')
-        ax[0].set(title="Ex 4: Deflexão Central", xlabel="Tempo $\hat{t}$", ylabel="$w$ (m)")
+        ax[0].set(title="Ex 4: Deflexão no Ponto de Maior Amplitude", xlabel="Tempo $\hat{t}$", ylabel="$w$ (m)")
         ax[0].grid(True)
         
         ax[1].plot(hist['t'], hist['p_out'], color='darkgreen')
-        ax[1].set(title="Ex 4: Pressão de Saída", xlabel="Tempo $\hat{t}$", ylabel="$p$ (Pa)")
+        ax[1].set(title="Ex 4: Pressão de Saída (Balanço de Volume)", xlabel="Tempo $\hat{t}$", ylabel="$p$ (Pa)")
         ax[1].grid(True)
         plt.tight_layout()
         plt.show()
@@ -301,8 +310,8 @@ class HidraulicoMecanico:
 
 if __name__ == "__main__":
     # Execução sequencial encapsulada
-    HidraulicoMecanico.executar_ex_01()
-    estado_ex2 = HidraulicoMecanico.executar_ex_02()
-    HidraulicoMecanico.executar_ex_03(estado_ex2)
-    w3_hat = HidraulicoMecanico.executar_ex_04()
-    HidraulicoMecanico.executar_ex_05(w3_hat)
+    #HidraulicoMecanico.executar_ex_01()
+    #estado_ex2 = HidraulicoMecanico.executar_ex_02()
+    #HidraulicoMecanico.executar_ex_03(estado_ex2)
+    w3_hat = HidraulicoMecanico.executar_ex_04(modo=1)
+    #HidraulicoMecanico.executar_ex_05(w3_hat)
