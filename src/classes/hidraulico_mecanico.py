@@ -138,13 +138,17 @@ class HidraulicoMecanico:
             sol = solver_LU(b_global)
             
             w, v, p = sol[0:self.nm], sol[self.nm:2*self.nm], sol[2*self.nm:]
+
             
             # Reversão Dimensional para Histórico
             p_out_dim = p[self.nout] * self.pref
             q_out_dim = (self.h_hat**2) * np.sum(v * self.uns) * (self.vref * self.R_dim**2)
             w_cen_dim = w[idx_monitor] * self.w0  # MONITORANDO O NÓ DE INTERESSE
             vol_dim = (self.h_hat**2) * np.sum(w * self.uns) * (self.w0 * self.R_dim**2)
-            pot_dim = (p.T @ self.A_dim_pura @ p) * (self.pref * self.vref * self.R_dim**2)
+
+            p_dim_vetor = p * self.pref
+
+            pot_dim = p_dim_vetor.T @ self.A_dim_pura @ p_dim_vetor
             
             hist['t'].append(t_hat)
             hist['p_out'].append(p_out_dim)
@@ -310,8 +314,8 @@ class HidraulicoMecanico:
 
 if __name__ == "__main__":
     # Execução sequencial encapsulada
-    #HidraulicoMecanico.executar_ex_01()
-    #estado_ex2 = HidraulicoMecanico.executar_ex_02()
-    #HidraulicoMecanico.executar_ex_03(estado_ex2)
+    HidraulicoMecanico.executar_ex_01()
+    estado_ex2 = HidraulicoMecanico.executar_ex_02()
+    HidraulicoMecanico.executar_ex_03(estado_ex2)
     w3_hat = HidraulicoMecanico.executar_ex_04(modo=1)
-    #HidraulicoMecanico.executar_ex_05(w3_hat)
+    HidraulicoMecanico.executar_ex_05(w3_hat)
