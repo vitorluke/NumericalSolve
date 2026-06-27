@@ -198,6 +198,119 @@ class HidraulicoMecanico:
         return estado_final
 
     @classmethod
+    def comparar_dt(cls):
+
+        dt_list = [0.00625, 0.0125, 0.025, 0.05]
+
+        print("\n=== Comparação de Δt ===\n")
+
+        for dt in dt_list:
+
+            sistema = cls(
+                N_mem=51,
+                H_k=1000e-6,
+                beta_hat=0.1
+            )      
+
+            def p_in(t):
+                return 10000.0
+
+            hist, _ = sistema.solver_transiente(
+                dt_hat=dt,
+                t_final_hat=12.0,
+                p_inlet_func=p_in
+                )
+
+            print(
+                f"dt={dt:8.5f} | "
+                f"wmax={np.max(np.abs(hist['w_center'])):.4e} | "
+                f"Vfinal={hist['volume'][-1]:.4e}"
+            )
+
+    @classmethod
+    def comparar_malha(cls):
+
+        print("\n=== Comparação de Malha ===\n")
+
+        for N in [25,51, 101,201]:
+
+            sistema = cls(
+                N_mem=N,
+                H_k=1000e-6,
+                beta_hat=0.1
+            )
+
+            def p_in(t):
+                return 10000.0
+
+            hist, _ = sistema.solver_transiente(
+                dt_hat=0.025,
+                t_final_hat=12.0,
+                p_inlet_func=p_in
+            )
+
+            print(
+                f"N={N} | "
+                f"wmax={np.max(np.abs(hist['w_center'])):.4e} | "
+                f"Vfinal={hist['volume'][-1]:.4e}"
+            )
+
+    @classmethod
+    def comparar_pressao(cls):
+
+        print("\n=== Comparação de Pressão ===\n")
+
+        for Pin in [5000.0, 10000.0, 20000.0]:
+
+            sistema = cls(
+                N_mem=51,
+                beta_hat=0.1
+            )
+
+            def p_in(t):
+                return Pin
+
+            hist, _ = sistema.solver_transiente(
+                dt_hat=0.025,
+                t_final_hat=12.0,
+                p_inlet_func=p_in
+            )
+
+            print(
+                f"Pin={Pin:8.0f} | "
+                f"wmax={np.max(np.abs(hist['w_center'])):.4e} | "
+                f"Vfinal={hist['volume'][-1]:.4e}"
+            )
+
+    @classmethod
+    def comparar_H(cls):
+
+        print("\n=== Comparação de H ===\n")
+
+        for H in [500e-6, 1000e-6, 2000e-6]:
+
+            sistema = cls(
+                N_mem=51,
+                H_k=H,
+                beta_hat=0.1
+            )
+
+            def p_in(t):
+                return 10000.0
+
+            hist, _ = sistema.solver_transiente(
+                dt_hat=0.025,
+                t_final_hat=12.0,
+                p_inlet_func=p_in
+            )
+
+            print(
+                f"H={H*1e6:6.0f} um | "
+                f"qmax={np.max(np.abs(hist['q_out'])):.4e} | "
+                f"Pmax={np.max(hist['potencia']):.4e}"
+            )
+
+    @classmethod
     def executar_ex_03(cls, estado_inicial_ex2):
         print("=== Exercício 3: Relaxação Instântanea ===")
         sistema = cls(N_mem=51, H_k=1000e-6, beta_hat=0.1)
