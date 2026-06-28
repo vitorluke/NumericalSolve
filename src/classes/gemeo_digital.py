@@ -124,7 +124,7 @@ class GemeoDigital:
         plt.plot(p_O_lin, Prob[10], '-o', label='$f_{obs}=10$')
         plt.ylim(0, 100)
         plt.title("Domínio de probabilidade")
-        plt.xlabel("Iterações")
+        plt.xlabel("$p_O$")
         plt.ylabel("Probabilidade global de falha (%)")
         plt.legend()
         plt.savefig("imagens/gêmeo digital/ex 1_1/iii.png")
