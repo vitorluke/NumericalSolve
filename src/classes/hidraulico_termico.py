@@ -9,17 +9,9 @@ from src.classes.rede_hidraulica import RedeHidraulica
 from src.classes.placa_termica import PlacaTermica
 
 class HidraulicoTermico:
-    def __init__(self, Nx, Ny):
-        self.placa = PlacaTermica(
-            Lx=0.03,
-            Ly=0.015,
-            Nx=Nx,
-            Ny=Ny,
-            k=0.25,
-            R=0.0025,
-            fonte_calor=5e5
-        )
-        self.rede = RedeHidraulica(levels=3)
+    def __init__(self, rede, placa):
+        self.placa = placa
+        self.rede = rede
         
         # =========================================================
         # CORREÇÃO DEFINITIVA: Escala e Distribuição da Rede
@@ -41,6 +33,21 @@ class HidraulicoTermico:
         
         kx, ky = self.calcular_k_faces(dmax=0.001)
         self.placa.T = self.resolver_sistema_ex1(kx, ky, Tc=35.0)
+
+    @classmethod
+    def instantiate_subsystems(cls, Nx, Ny):
+        placa = PlacaTermica(
+            Lx=0.03,
+            Ly=0.015,
+            Nx=Nx,
+            Ny=Ny,
+            k=0.25,
+            R=0.0025,
+            fonte_calor=5e5
+        )
+        rede = RedeHidraulica(levels=3)
+
+        return cls(placa, rede)
 
     # =======================================================================
     # MÉTODOS ORIGINAIS MANTIDOS (Viscosidade, Integração, etc.)
@@ -343,7 +350,7 @@ class HidraulicoTermico:
                 print(f"\n--- dmax = {dmax} ---")
                 inicio = time.perf_counter()
                 
-                sistema = HidraulicoTermico(Nx, Ny)
+                sistema = HidraulicoTermico.instantiate_subsystems(Nx, Ny)
                 dx = sistema.placa.Lx / (Nx - 1)
                 dy = sistema.placa.Ly / (Ny - 1)
 
@@ -444,11 +451,11 @@ class HidraulicoTermico:
 # =======================================================================
 
 def ex_2_acoplamento():
-    acoplamento = HidraulicoTermico(241, 121)
+    acoplamento = HidraulicoTermico.instantiate_subsystems(241, 121)
     for method in ['linear', 'nearest', 'cubic']:
         acoplamento.mapa_contorno_grade_secundaria(101, 51, method=method)
     
-    acoplamento_reduzido = HidraulicoTermico(61, 31)
+    acoplamento_reduzido = HidraulicoTermico.instantiate_subsystems(61, 31)
     for method in ['linear', 'nearest', 'cubic']:
         acoplamento_reduzido.mapa_contorno_grade_secundaria(41, 21, method=method)
     
@@ -456,7 +463,7 @@ def ex_2_acoplamento():
 
 
 def ex_3_acoplamento():
-    acoplamento = HidraulicoTermico(241, 121)
+    acoplamento = HidraulicoTermico.instantiate_subsystems(241, 121)
     configs = [
         ('monte_carlo', 10), ('monte_carlo', 100),
         ('ponto_medio', 10), ('ponto_medio', 100),
@@ -480,7 +487,7 @@ def ex_4_acoplamento():
 
     for Nx, Ny in malhas:
         print(f"Processando malha: {Nx}x{Ny}...")
-        sistema = HidraulicoTermico(Nx, Ny)
+        sistema = HidraulicoTermico.instantiate_subsystems(Nx, Ny)
         
         sistema.atualizar_condutancias_ex4(metodo='trapezio', n_sub=10)
         
@@ -555,7 +562,7 @@ def calcular_termo_fonte_gaussiano(Nx, Ny, Lx, Ly, coord, edges, S0, distribuica
 
 def ex_5_acoplamento():
     print("\n--- EXERCÍCIO 5: COMPARAÇÃO DE MODELAGEM DA VISCOSIDADE ---")
-    sistema = HidraulicoTermico(241, 121) 
+    sistema = HidraulicoTermico.instantiate_subsystems(241, 121) 
     
     sistema.atualizar_condutancias_ex4(metodo='trapezio', n_sub=100)
     P4 = sistema.rede.pressao.max()
@@ -587,7 +594,7 @@ def ex_2_extra():
     Lx, Ly = 0.03, 0.015
     d_max = 0.001  
     
-    sim_base = HidraulicoTermico(Nx, Ny)
+    sim_base = HidraulicoTermico.instantiate_subsystems(Nx, Ny)
     coord = sim_base.rede.posicoes_nos
     edges = sim_base.rede.conectividade
     
@@ -690,6 +697,5 @@ def ex_1_especial_acoplamento():
     print(df_resultados.to_string(index=False))
 
 if __name__ == "__main__":
-    # Teste isolado do exercício corrigido
-    sistema_teste = HidraulicoTermico(61, 31)
+    sistema_teste = HidraulicoTermico.instantiate_subsystems(61, 31)
     sistema_teste.exercicio_1_2()

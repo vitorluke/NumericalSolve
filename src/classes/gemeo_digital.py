@@ -12,19 +12,22 @@ from scipy.interpolate import interp1d
 # Ocultar avisos transientes e de otimização
 warnings.simplefilter('ignore')
 
-# Importações dos módulos físicos exigidos pelo ICMC-USP
 from src.classes.rede_hidraulica import RedeHidraulica
 from src.classes.placa_termica import PlacaTermica
 from src.classes.membrana_elastica import MembranaElastica
+
+from src.classes.hidraulico_termico import HidraulicoTermico
 
 class GemeoDigital:
     def __init__(self, levels_rede=3):
         """Inicializa o Gêmeo Digital instanciando as três físicas principais."""
         print("[GD] Inicializando os subsistemas físicos...")
-        self.rede = RedeHidraulica(levels=levels_rede)
+        self.rede = RedeHidraulica(levels=levels_rede, A_k=1.0e-6)
         self.placa = PlacaTermica(Lx=0.03, Ly=0.015, Nx=61, Ny=31, k=0.25, R=0.0025, fonte_calor=5e5)
         self.membrana = MembranaElastica(N=51, R=0.0025)
         
+        self.acop_termico = HidraulicoTermico(self.rede, self.placa)
+
         # Estruturas para guardar o histórico temporal (Usado no ex_4)
         self.hist_mono = None
         self.hist_part = None
@@ -44,101 +47,88 @@ class GemeoDigital:
         print(f"[GD] Vazão Nominal (20°C): {self.vazao_nominal:.4e} m³/s")
         print(f"[GD] Limite Crítico de Projeto: {self.limite_critico:.4e} m³/s")
 
-    def _extrair_vazao(self, pressao_inlet=5000.0):
+    # =========================================================================
+    # EX 1.1: Análise estacionária de falhas hidraulicas
+    # =========================================================================
+        # Ex 1.1 i RandomFail()
+    def _RandomFail(self, p_O, f_obs):
+        C_modificado = self.condutancias_originais.copy()
+        C_modificado[np.random.rand(len(C_modificado)) < p_O] /= f_obs
+
+        return C_modificado
+    
+    def _extrair_vazao(self):
         """Método auxiliar para extrair a vazão do nó de entrada isolando a bomba."""
         try:
-            p_sol = self.rede.resolver(pressao_imposta={1: pressao_inlet}, vazao_imposta={175: 0.0})
-            return np.dot(self.rede.matriz_global[0, :], p_sol)
+            p_sol = self.rede.resolver(pressao_imposta={1: 5e3, 6: 0.0})
+            return np.abs(np.dot(self.rede.matriz_global[0, :], p_sol))
         except np.linalg.LinAlgError:
             return 0.0
-
-    # =========================================================================
-    # EX 0: ESTOCÁSTICO, SURROGATE MODEL E GRÁFICO COMBINADO INTERPOLAÇÃO/REGRESSÃO
-    # =========================================================================
-    def ex_0(self, N_amostras=500, p_O=0.20, f_obs=5.0, dt=0.05, t_max=4.0):
+    
+    def ex_1_1(self):
         print("\n" + "="*60)
-        print("EX 0: TESTES ESTOCÁSTICOS E SURROGATE MODEL UNIFICADO")
+        print("EX 1.1: Análise estacionária de falhas hidraulicas")
         print("="*60)
-        
-        # 0.1 Convergência Monte Carlo
-        print(f"\n[Ex 0.1] Convergência Monte Carlo (N={N_amostras})...")
-        falhas_criticas = 0
-        for i in range(1, N_amostras + 1):
-            cond = self.condutancias_originais.copy()
-            cond[np.random.rand(len(cond)) < p_O] /= f_obs
-            self.rede.condutancias = cond
-            self.rede.assembly() 
-            if self._extrair_vazao() < self.limite_critico:
-                falhas_criticas += 1
-        print(f"-> Probabilidade Final Estabilizada: {falhas_criticas/N_amostras:.4f}")
-        
-        # 0.2 Curva de Fragilidade
-        print(f"\n[Ex 0.2] Curva de Fragilidade (N={N_amostras} por ponto)...")
-        vetor_pO = np.linspace(0.05, 0.65, 7)
-        for p_idx in vetor_pO:
-            falhas = 0
-            for _ in range(N_amostras):
-                cond = self.condutancias_originais.copy()
-                cond[np.random.rand(len(cond)) < p_idx] /= f_obs
-                self.rede.condutancias = cond
-                self.rede.assembly()
-                if self._extrair_vazao() < self.limite_critico:
-                    falhas += 1
-            print(f"  p_O = {p_idx:.2f} -> Probabilidade de Falha: {falhas/N_amostras:.4f}")
-        
-        # 0.3 Surrogate Model & Interpolação/Regressão Simultânea (Ajustado com a Imagem de Referência)
-        print("\n[Ex 0.3] Processando Aproximação de Dados Espaciais/Temporais...")
-        self.rede.condutancias = self.condutancias_originais.copy()
-        self.rede.assembly()
-        
-        t_array = np.arange(0, t_max + dt/2, dt)
-        P_noisy = np.zeros_like(t_array)
-        P_clean = np.zeros_like(t_array)
-        
-        for i, t in enumerate(t_array):
-            ruido = np.random.uniform(-0.15, 0.15)
-            self.rede.resolver(pressao_imposta={1: 5000.0 * (1.0 + ruido)}, vazao_imposta={175: 0.0})
-            P_noisy[i] = float(self.rede.calcular_potencia())
-            
-            self.rede.resolver(pressao_imposta={1: 5000.0}, vazao_imposta={175: 0.0})
-            P_clean[i] = float(self.rede.calcular_potencia())
 
-        t_eval = np.linspace(0, t_max, 500)
-        f_lin = interp1d(t_array, P_noisy, kind='linear')
-        f_cub = interp1d(t_array, P_noisy, kind='cubic')
+        # 1.1 ii  Convergência Monte Carlo
         
-        # Geração do Gráfico Combinado Final
-        plt.figure(figsize=(10, 6))
-        plt.plot(t_array, P_noisy, 'ko', label='Dados Ruidosos')
-        plt.plot(t_eval, f_lin(t_eval), 'b-', alpha=0.75, label='Spline Linear')
-        plt.plot(t_eval, f_cub(t_eval), color='orange', linestyle='--', linewidth=2, label='Spline Cúbica')
-        
-        for m in [3, 8, 15]:
-            coefs = np.polyfit(t_array, P_noisy, m)
-            P_poly_eval = np.polyval(coefs, t_eval)
-            P_poly_pts = np.polyval(coefs, t_array)
+        N_amostras = 5000
+        print(f"\n[EX 1.1 i] Convergência Monte Carlo (N={N_amostras})...")
+        falhas_criticas = 0
+        Y = []
+
+        for i in range(1, N_amostras + 1):
+            self.rede.condutancias = self._RandomFail(p_O=0.35, f_obs=5.0)
+            self.rede.assembly()
+            vazao = self._extrair_vazao()
+            if vazao < self.limite_critico:
+                falhas_criticas += 1
             
-            # Cálculo robusto da norma L2 contínua independente da versão do NumPy
-            diff = P_clean - P_poly_pts
-            erro_L2 = np.sqrt(np.sum((diff[:-1]**2 + diff[1:]**2) / 2) * dt)
-            label_status = "Balanceado" if m == 8 else "Overfitting" if m == 15 else "Underfitting"
-            print(f"  -> Grau {m:2d} ({label_status}): Erro L2 = {erro_L2:.4e}")
-            
-            if m == 8:
-                plt.plot(t_eval, P_poly_eval, 'g-.', linewidth=2, label='Polinômio Grau 8 (Ajustado)')
-            elif m == 15:
-                plt.plot(t_eval, P_poly_eval, 'r-', linewidth=1.5, label='Polinômio Grau 15 (Overfitting)')
-                
-        plt.plot(t_array, P_clean, color='magenta', linestyle=':', linewidth=2.5, alpha=0.6, label='Curva Exata (Alvo)')
-        plt.title('Aproximação de Dados via Interpolação e Regressão', fontsize=12, fontweight='bold')
-        plt.xlabel('Tempo (s)')
-        plt.ylabel('Potência Hidráulica $\mathcal{P}(t)$')
-        plt.legend(loc='best', framealpha=0.9)
-        plt.grid(True, linestyle='--', alpha=0.5)
-        plt.tight_layout()
+            Y.append(falhas_criticas/i*100.0)
+
+        Prob = falhas_criticas/N_amostras*100
+        X = np.linspace(1, N_amostras, N_amostras)
+        print(f"-> Probabilidade Final Estabilizada: {Prob:.2f}%")
+
+        plt.figure(figsize=(9,5))
+        plt.plot(X, Y)
+        plt.axhline(Prob, linestyle='--', label=f"Assíntota $\\approx {Prob:.2f}\\%$")
+        plt.ylim(0, 100)
+        plt.title("Convergência do método de Monte Carlo")
+        plt.xlabel("Iterações")
+        plt.ylabel("Probabilidade global de falha (%)")
+        plt.legend()
+        plt.savefig("imagens/gêmeo digital/ex 1_1/ii.png")
         plt.show()
+
+        # 1.1 iii Domínio de probabilidade
+        
+        p_O_lin = np.linspace(0.05, 0.65, 7)
+        Prob = {5: [], 10: []}
+
+        for p_O in p_O_lin:
+            for f_obs in Prob:
+                falhas_criticas = 0
+                for i in range(1, N_amostras + 1):
+                    self.rede.condutancias = self._RandomFail(p_O=p_O, f_obs=f_obs)
+                    self.rede.assembly()
+                    vazao = self._extrair_vazao()
+
+                    if vazao < self.limite_critico:
+                        falhas_criticas += 1
             
-        self.rede.condutancias = self.condutancias_originais.copy()
+                Prob[f_obs].append(falhas_criticas/N_amostras*100.0)
+
+        plt.figure(figsize=(9,5))
+        plt.plot(p_O_lin, Prob[5], '-o', label='$f_{obs}=5$')
+        plt.plot(p_O_lin, Prob[10], '-o', label='$f_{obs}=10$')
+        plt.ylim(0, 100)
+        plt.title("Domínio de probabilidade")
+        plt.xlabel("Iterações")
+        plt.ylabel("Probabilidade global de falha (%)")
+        plt.legend()
+        plt.savefig("imagens/gêmeo digital/ex 1_1/iii.png")
+        plt.show()
 
     # =========================================================================
     # EX 1 ESPECIAL: CAMPO TÉRMICO COM MICRO REATOR A 45°C
@@ -470,24 +460,24 @@ class GemeoDigital:
 if __name__ == "__main__":
     gd = GemeoDigital()
     
-    # 1. Executa o bloco estocástico e plota o gráfico unificado de regressão/interpolação
-    #gd.ex_0()
+    # 1.1 Análise estacionária de falhas hidraulicas
+    gd.ex_1_1()
     
     # 2. Resolve e projeta o campo térmico estático do reator
-    gd.ex_1_especial()
+    # gd.ex_1_especial()
     
     # 3. Executa a análise de sensibilidade varrendo os raios geométricos
-    gd.ex_2_especial()
+    # gd.ex_2_especial()
     
     # 4. Processa o acoplamento térmico-hidráulico nominal
-    gd.ex_1()
+    # gd.ex_1()
     
     # 5. Executa os transientes estruturais mecânicos (Monolítico e Particionado)
-    gd.ex_2()
-    gd.ex_3()
+    # gd.ex_2()
+    # gd.ex_3()
     
     # 6. Exibe os gráficos comparativos e a evolução temporal do erro relativo L2
-    gd.ex_4()
+    # gd.ex_4()
     
     # 7. Imprime as tabelas analíticas no terminal e roda a animação dinâmica 2D e 3D síncrona
-    gd.ex_5_analise_tabelas_e_animacao_completa()
+    # gd.ex_5_analise_tabelas_e_animacao_completa()

@@ -6,13 +6,13 @@ import matplotlib.cm as cm
 from src.graphs_utils.gera_grafo import gera_grafo
 
 class RedeHidraulica:
-    def __init__(self, levels:int=3):
+    def __init__(self, levels:int=3, A_k=2.5e-7):
         """Construtor da rede hidráulica acoplada à placa térmica."""
 
         self.Lx = 0.03
         self.Ly = 0.015
 
-        self.A_k = 2.5e-7
+        self.A_k = A_k
 
         self.D_k = np.sqrt(
             4 * self.A_k / np.pi
@@ -21,26 +21,7 @@ class RedeHidraulica:
         self.temperatura_referencia = 20.0
 
         coordenadas, conectividade = gera_grafo(levels)
-
-        x = coordenadas[:, 0]
-        y = coordenadas[:, 1]
-
-        x_norm = (
-            x - x.min()
-        ) / (
-            x.max() - x.min()
-        )
-
-        y_norm = (
-            y - y.min()
-        ) / (
-            y.max() - y.min()
-        )
-
-        coordenadas = np.column_stack([
-            x_norm * self.Lx,
-            y_norm * self.Ly
-        ])
+        coordenadas *= 1e-3
 
         self.numero_nos = len(coordenadas)
 
@@ -157,21 +138,6 @@ class RedeHidraulica:
         vazao_modificada = np.zeros(
             self.numero_nos
         )
-
-        # Inlet 0
-        vazao_modificada[0] = 1e-7
-
-        # Inlet 175
-        if self.numero_nos > 174:
-            vazao_modificada[174] = 1e-6
-
-        # Outlet com pressão atmosférica
-        outlet = self.numero_nos - 1
-
-        matriz_modificada[outlet, :] = 0
-        matriz_modificada[outlet, outlet] = 1
-
-        vazao_modificada[outlet] = 0.0
 
         # Condições extras opcionais
         for k, vazao in vazao_imposta.items():
