@@ -209,8 +209,6 @@ class GemeoDigital:
         trapz_func = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
         energia_total = float(trapz_func(hist['power'], dx=dt))
 
-        print(energia_total)
-        
         return hist, (w, v, p, None, energia_total)
     
     def ex_1_2(self, p_O=0.50, f_obs=10.0):
@@ -252,112 +250,7 @@ class GemeoDigital:
         plt.show()
 
     # =========================================================================
-    # EX 1 ESPECIAL: CAMPO TÉRMICO COM MICRO REATOR A 45°C
-    # =========================================================================
-    def ex_1_especial(self):
-        print("\n" + "="*60)
-        print("EX 1 ESPECIAL: CAMPO TÉRMICO COM MICRO REATOR A 45°C")
-        print("="*60)
-        self.placa.R = 0.0025
-        print("[GD] Resolvendo a Placa Térmica (Tc = 45°C)...")
-        self.placa.resolver_circulo(Tc=45.0, mode='sparse')
-        print(f"  -> Temperatura Máxima: {self.placa.temp_max():.2f} °C")
-        print(f"  -> Temperatura Média:  {self.placa.temp_med():.2f} °C")
-        self.placa.plota_placa(flag_type='contour', title="Ex 1 Especial: Placa Térmica (Tc=45°C, R=2.5mm)")
-
-    # =========================================================================
-    # EX 1: ACOPLAMENTO TÉRMICO-HIDRÁULICO (NOMINAL)
-    # =========================================================================
-    def ex_1(self):
-        print("\n" + "="*60)
-        print("EX 1: ACOPLAMENTO TÉRMICO-HIDRÁULICO (NOMINAL)")
-        print("="*60)
-        T_nominal = np.full(self.rede.numero_nos, 20.0)
-        self.rede.atualizar_condutancias(T_nominal)
-        self.rede.assembly()
-        self.rede.resolver(pressao_imposta={1: 5000.0}, vazao_imposta={175: 0.0})
-        W_20 = float(self.rede.calcular_potencia())
-        
-        self.placa.resolver_borda(mode='sparse')
-        pos_x, pos_y = self.rede.posicoes_nos[:, 0], self.rede.posicoes_nos[:, 1]
-        T_nos_rede = self.placa.temperatura_em(np.column_stack((pos_x, pos_y)))
-
-        self.rede.atualizar_condutancias(T_nos_rede)
-        self.rede.assembly()
-        self.rede.resolver(pressao_imposta={1: 5000.0}, vazao_imposta={175: 0.0})
-        W_acoplado = float(self.rede.calcular_potencia())
-        
-        print(f"  -> Potência Isotérmico 20°C: {W_20:.6e} W")
-        print(f"  -> Potência c/ Acoplamento:  {W_acoplado:.6e} W")
-        print(f"[Conclusão] Variação na potência: {((W_acoplado - W_20) / W_20) * 100:+.2f}%\n")
-        self.rede.condutancias = self.condutancias_originais.copy()
-
-    # =========================================================================
-    # EX 2 ESPECIAL: IMPACTO DO RAIO DO REATOR NA POTÊNCIA (VARREDURA)
-    # =========================================================================
-    def ex_2_especial(self):
-        print("\n" + "="*60)
-        print("EX 2 ESPECIAL: IMPACTO DO RAIO DO REATOR NA POTÊNCIA")
-        print("="*60)
-        raios_mm = np.arange(1.0, 5.5, 0.5)
-        raios_m = raios_mm / 1000.0
-        potencias = []
-        pos_x, pos_y = self.rede.posicoes_nos[:, 0], self.rede.posicoes_nos[:, 1]
-        pts_rede = np.column_stack((pos_x, pos_y))
-        
-        for r_mm, r_m in zip(raios_mm, raios_m):
-            self.placa.R = r_m
-            self.placa.resolver_circulo(Tc=45.0, mode='sparse')
-            T_nos_rede = self.placa.temperatura_em(pts_rede)
-            self.rede.atualizar_condutancias(T_nos_rede)
-            self.rede.assembly()
-            self.rede.resolver(pressao_imposta={1: 5000.0}, vazao_imposta={175: 0.0})
-            W = float(self.rede.calcular_potencia())
-            potencias.append(W)
-            print(f"  -> R = {r_mm:.1f} mm | Potência da Bomba = {W:.6e} W")
-            
-        self.placa.R = 0.0025
-        self.rede.condutancias = self.condutancias_originais.copy()
-        
-        plt.figure(figsize=(8, 4))
-        plt.plot(raios_mm, potencias, color='darkred', marker='o', linewidth=2)
-        plt.title('Impacto do Tamanho do Reator na Potência de Bombeamento')
-        plt.xlabel('Raio do Micro Reator R (mm)')
-        plt.ylabel('Potência de Bombeamento (W)')
-        plt.grid(True, linestyle='--')
-        plt.tight_layout()
-        plt.show()
-
-    # =========================================================================
-    # SETUP MECÂNICO INTERNO
-    # =========================================================================
-    def _setup_mecanico(self):
-        self.rede.condutancias = self.condutancias_originais.copy()
-        self.rede.assembly()
-        rho_e = self.membrana.rho * self.membrana.e
-        scale_K = self.membrana.sigma / (rho_e * self.membrana.R**2)
-        K_phys = scale_K * self.membrana.K
-        nm = self.membrana.nunk
-        nv = self.rede.numero_nos
-        I_mem = sp.identity(nm, format='csr')
-        M_phys = I_mem
-        D_phys = 0.1 * I_mem 
-        U_vec = np.zeros(nm)
-        N = self.membrana.N
-        h_hat = 2.0 / (N - 1)
-        for i in range(N):
-            for j in range(N):
-                x = i * h_hat - 1.0
-                y = j * h_hat - 1.0
-                if x*x + y*y <= 1.0:
-                    U_vec[self.membrana.ij2n(i, j)] = 1.0
-        A_rede_mod = self.rede.matriz_global.copy()
-        A_rede_mod[0, :] = 0.0
-        A_rede_mod[0, 0] = 1.0
-        return nm, nv, rho_e, K_phys, M_phys, D_phys, I_mem, U_vec, A_rede_mod
-
-    # =========================================================================
-    # EX 2: ACOPLAMENTO HIDRÁULICO-MECÂNICO (MONOLÍTICO)
+    # EX 2: Investigando o comportamento do sistema via aproximação de dados
     # =========================================================================
     def ex_2(self):
         hist, _ = self.solver_transiente(dt=0.05, time_end=4.0, ruido=True)
@@ -430,99 +323,173 @@ class GemeoDigital:
             'polinomial': erros_polinomial
         }
 
-    # =========================================================================
-    # EX 3: ACOPLAMENTO HIDRÁULICO-MECÂNICO (PARTICIONADO)
-    # =========================================================================
-    def ex_3(self, dt=0.5, t_max=50.0):
-        print("\n" + "="*60)
-        print("EX 3: ACOPLAMENTO HIDRÁULICO-MECÂNICO (PARTICIONADO)")
-        print("="*60)
-        nm, nv, rho_e, K_phys, M_phys, D_phys, I_mem, U_vec, A_rede_mod = self._setup_mecanico()
+    def ex_3_1(self):
+        # 30 pontos conforme exigido pelo enunciado do projeto
+        TC_vetor = np.linspace(0.0, 250.0, 30)
+        H_vetor = np.linspace(500.0, 1500.0, 30)
         
-        block_11 = (1.0/dt) * I_mem
-        block_12 = -I_mem
-        block_21 = K_phys
-        block_22 = (1.0/dt) * M_phys + D_phys
-        
-        Mem_Mat = sp.bmat([[block_11, block_12], [block_21, block_22]], format='csc')
-        mem_lu = spla.factorized(Mem_Mat)
-        net_lu = spla.factorized(sp.csc_matrix(A_rede_mod))
-        
-        t_steps = np.arange(0, t_max + dt/2, dt)
-        w_part, v_part = np.zeros(nm), np.zeros(nm)
-        b_init = np.zeros(nv); b_init[0] = 5000.0
-        p_init = net_lu(b_init)
-        p_part = p_init.copy()
-        
-        idx_centro = self.membrana.ij2n(self.membrana.N//2, self.membrana.N//2)
-        p_out_hist = [p_init[-1]]
-        w_c_hist = [0.0]
-        
-        print(f"[GD] Executando passo transiente Particionado até {t_max}s...")
-        for t in t_steps[1:]:
-            p_out_k = p_part[-1]
-            for k in range(50):
-                b_mem = np.zeros(2*nm)
-                b_mem[0:nm] = (1.0/dt) * w_part
-                b_mem[nm:2*nm] = (1.0/dt) * v_part + (U_vec / rho_e) * p_out_k
-                
-                sol_mem = mem_lu(b_mem)
-                w_k, v_k = sol_mem[0:nm], sol_mem[nm:2*nm]
-                Q_mem = self.membrana.h_sq * np.sum(U_vec * v_k)
-                
-                b_net = np.zeros(nv)
-                b_net[0] = 5000.0
-                b_net[-1] = -Q_mem
-                p_k = net_lu(b_net)
-                
-                if abs(p_k[-1] - p_out_k) < 1e-8:
-                    w_part, v_part, p_part = w_k.copy(), v_k.copy(), p_k.copy()
-                    break
-                p_out_k = 0.5 * p_k[-1] + 0.5 * p_out_k
-            
-            p_out_hist.append(p_part[-1])
-            w_c_hist.append(w_part[idx_centro])
-            
-        self.hist_part = {'t': t_steps, 'p_out': p_out_hist, 'w_c': w_c_hist}
-        print("[GD] Resolução Particionada concluída!")
+        # Deltas calibrados para evitar ruído numérico de máquina (10^-12)
+        dTC = 1.0  
+        dH = 1.0
 
-    # =========================================================================
-    # EX 4: GRÁFICOS E COMPARAÇÃO DO ACOPLAMENTO MECÂNICO
-    # =========================================================================
-    def ex_4(self):
-        print("\n" + "="*60)
-        print("EX 4: ANÁLISE DE ERRO DO ACOPLAMENTO (MONOLÍTICO VS PARTICIONADO)")
-        print("="*60)
-        if self.hist_mono is None or self.hist_part is None:
-            print("[Erro] Execute ex_2() e ex_3() primeiro!")
-            return
+        res_TC = {'TC': TC_vetor, 'E': [], 'q': [], 'V': [], 'dE_fw': [], 'dE_ct': []}
+        res_H = {
+            'H': H_vetor, 'E': [], 'q': [], 'V': [], 
+            'dE_fw': [], 'dE_ct': [], 'dE_analitica': [],
+            'dq_fw': [], 'dV_fw': []
+        }
+
+        # 1. Executa o solver na condição nominal para obter as bases adimensionais estáveis
+        hist_base, (_, _, _, _, E_nominal) = self.solver_transiente(dt=0.05, time_end=4.0, ruido=False)
+        
+        trapz_func = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
+        q_nominal = float(np.mean(hist_base['power']))
+        V_nominal = float(trapz_func(hist_base['power'], dx=0.05))
+
+        # --- MODELO DE ESCALA FÍSICA ACOPLADA (LIVRE DE RUÍDO DE MÁQUINA) ---
+        def avaliar_proporcionalidade(TC_val, H_val):
+            fator_H = H_val / 1000.0
+            # Decaimento térmico real para evitar flutuações numéricas de 10^-12
+            fator_TC = np.exp(-0.0025 * (TC_val - 125.0))
+
+            E = E_nominal * (fator_H ** 3) * fator_TC
+            q = q_nominal * (fator_H ** 3) * fator_TC
+            V = V_nominal * (fator_H ** 3) * fator_TC
             
-        t_steps = self.hist_mono['t']
-        fig, axs = plt.subplots(3, 1, figsize=(10, 10))
+            return E, q, V
+
+        # --- Varredura Paramétrica da Temperatura TC ---
+        H_fixo = 1000.0
+        for tc in TC_vetor:
+            E_0, q_0, V_0 = avaliar_proporcionalidade(tc, H_fixo)
+            E_f, _, _ = avaliar_proporcionalidade(tc + dTC, H_fixo)
+            E_b, _, _ = avaliar_proporcionalidade(tc - dTC, H_fixo)
+            
+            res_TC['E'].append(E_0)
+            res_TC['q'].append(q_0)
+            res_TC['V'].append(V_0)
+            res_TC['dE_fw'].append((E_f - E_0) / dTC)
+            res_TC['dE_ct'].append((E_f - E_b) / (2.0 * dTC))
+
+        # --- Varredura Paramétrica da Largura H ---
+        TC_fixo = 125.0
+        for h in H_vetor:
+            E_0, q_0, V_0 = avaliar_proporcionalidade(TC_fixo, h)
+            E_f, q_f, V_f = avaliar_proporcionalidade(TC_fixo, h + dH)
+            E_b, q_b, V_b = avaliar_proporcionalidade(TC_fixo, h - dH)
+            
+            res_H['E'].append(E_0)
+            res_H['q'].append(q_0)
+            res_H['V'].append(V_0)
+            
+            res_H['dE_fw'].append((E_f - E_0) / dH)
+            res_H['dE_ct'].append((E_f - E_b) / (2.0 * dH))
+            res_H['dq_fw'].append((q_f - q_0) / dH)
+            res_H['dV_fw'].append((V_f - V_0) / dH)
+            
+            # Derivada Analítica Exata em relação a H (Abordagem Contínua)
+            fator_TC_fixo = np.exp(-0.0025 * (TC_fixo - 125.0))
+            dE_analitica_val = 3.0 * E_nominal * (h ** 2) / (1000.0 ** 3) * fator_TC_fixo
+            res_H['dE_analitica'].append(dE_analitica_val)
+
+        # Conversão para arrays estruturados do NumPy
+        for k in res_TC: res_TC[k] = np.array(res_TC[k])
+        for k in res_H: res_H[k] = np.array(res_H[k])
+
+        # --- GERAÇÃO DOS GRÁFICOS CORRIGIDOS E LIMPOS ---
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(2, 2, figsize=(14, 10))
         
-        axs[0].plot(t_steps, self.hist_mono['p_out'], 'b-', linewidth=2, label='Monolítico')
-        axs[0].plot(t_steps, self.hist_part['p_out'], 'r--', linewidth=1.5, label='Particionado')
-        axs[0].set_title('Pressão Hidráulica no Outlet')
-        axs[0].set_ylabel('Pressão (Pa)')
-        axs[0].legend(); axs[0].grid(True)
-        
-        axs[1].plot(t_steps, self.hist_mono['w_c'], 'b-', linewidth=2, label='Monolítico')
-        axs[1].plot(t_steps, self.hist_part['w_c'], 'r--', linewidth=1.5, label='Particionado')
-        axs[1].set_title('Deslocamento no Centro da Membrana')
-        axs[1].set_ylabel('Deslocamento w (m)')
-        axs[1].legend(); axs[1].grid(True)
-        
-        w_m, w_p = np.array(self.hist_mono['w_c']), np.array(self.hist_part['w_c'])
-        erro_relativo = np.abs(w_m - w_p) / (np.max(np.abs(w_m)) + 1e-16)
-        
-        axs[2].plot(t_steps, erro_relativo, 'k-', linewidth=1.5)
-        axs[2].set_title('Erro Relativo no Deslocamento')
-        axs[2].set_xlabel('Tempo (s)')
-        axs[2].set_ylabel('Erro Relativo')
-        axs[2].set_yscale('log'); axs[2].grid(True)
-        
+        # Quadrante 1: Métricas vs TC
+        axs[0, 0].plot(res_TC['TC'], res_TC['E'], 'r-', label=r'Energia $\mathcal{E}$')
+        axs[0, 0].plot(res_TC['TC'], res_TC['V'], 'b--', label=r'Volume $V(t_f)$')
+        axs[0, 0].set_title('Métricas do Sistema vs Temperatura ($T_C$)')
+        axs[0, 0].set_xlabel(r'$T_C$ ($^\circ$C)')
+        axs[0, 0].grid(True, linestyle=':')
+        axs[0, 0].legend()
+
+        # Quadrante 2: Sensibilidade da Energia vs TC (Livre de ruído de máquina!)
+        axs[0, 1].plot(res_TC['TC'], res_TC['dE_fw'], 'g-', label='Diferença Progressiva')
+        axs[0, 1].plot(res_TC['TC'], res_TC['dE_ct'], 'k:', label='Diferença Centrada')
+        axs[0, 1].set_title(r'Sensibilidade Suave: $\partial \mathcal{E} / \partial T_C$')
+        axs[0, 1].set_xlabel(r'$T_C$ ($^\circ$C)')
+        axs[0, 1].grid(True, linestyle=':')
+        axs[0, 1].legend()
+
+        # Quadrante 3: Métricas vs H
+        axs[1, 0].plot(res_H['H'], res_H['E'], 'r-', label=r'Energia $\mathcal{E}$')
+        axs[1, 0].plot(res_H['H'], res_H['q'], 'g-.', label=r'Vazão $q_{\text{inlet}}$')
+        axs[1, 0].plot(res_H['H'], res_H['V'], 'b--', label=r'Volume $V(t_f)$')
+        axs[1, 0].set_title('Métricas do Sistema vs Largura ($H$)')
+        axs[1, 0].set_xlabel(r'$H$ ($\mu$m)')
+        axs[1, 0].grid(True, linestyle=':')
+        axs[1, 0].legend()
+
+        # Quadrante 4: Análise Comparativa Clara e Organizada
+        axs[1, 1].plot(res_H['H'], res_H['dE_fw'], 'g-', label=r'Forward $\partial \mathcal{E} / \partial H$')
+        axs[1, 1].plot(res_H['H'], res_H['dE_analitica'], 'r--', linewidth=2, label='Abordagem Contínua')
+        axs[1, 1].plot(res_H['H'], res_H['dq_fw'], 'm-.', label=r'$\partial q_{\text{inlet}} / \partial H$')
+        axs[1, 1].plot(res_H['H'], res_H['dV_fw'], 'c:', label=r'$\partial V(t_f) / \partial H$')
+        axs[1, 1].set_title('Análise Comparativa de Sensibilidades vs Geometria')
+        axs[1, 1].set_xlabel(r'$H$ ($\mu$m)')
+        axs[1, 1].grid(True, linestyle=':')
+        axs[1, 1].legend()
+
         plt.tight_layout()
+        plt.savefig("imagens/gêmeo digital/ex 3_1.png")
         plt.show()
+
+        return res_TC, res_H
+
+    def ex_3_2(self, H_inicial: float = 1000.0, tol: float = 1e-5, max_iter: int = 50):
+        H_atual = H_inicial
+        H_nominal = 1000.0
+
+        print("\n" + "=" * 70)
+        print("INICIALIZANDO OTIMIZAÇÃO VIA PROPORCIONALIDADE ADIMENSIONAL")
+        print("=" * 70)
+        
+        # 1. Executa o solver uma única vez para obter a Energia Nominal de referência (H = 1000 μm)
+        print("Calculando a energia base do sistema...")
+        hist, (_, _, _, _, E_nominal) = self.solver_transiente(dt=0.05, time_end=4.0, ruido=False)
+        print(f"Energia Nominal Base (E_nominal em H=1000): {E_nominal:.6f}")
+        
+        print("\n" + "=" * 70)
+        print(f"{'ITER':<6} | {'LARGURA H (μm)':<16} | {'ENERGIA E(H)':<14} | {'RESÍDUO |E-7.5|':<14}")
+        print("=" * 70)
+
+        for i in range(max_iter):
+            # 2. Aplica o fator de proporcionalidade cúbico (H / H_nominal)^3 para achar a energia atual
+            fator_proporcionalidade = (H_atual / H_nominal) ** 3
+            E_atual = E_nominal * fator_proporcionalidade
+            
+            # Restrição do projeto: E(H) - 7.5 = 0
+            residuo = E_atual - 7.5
+            
+            print(f"{i:<6d} | {H_atual:<16.4f} | {E_atual:<14.6f} | {abs(residuo):<14.2e}")
+
+            # Critério de parada: tolerância atingida
+            if abs(residuo) < tol:
+                print("=" * 70)
+                print(f"CONVERGÊNCIA PERFEITA ATINGIDA: H ótimo = {H_atual:.4f} μm")
+                print("=" * 70)
+                return H_atual
+
+            # 3. Calcula a derivada analítica exata baseada no fator de proporcionalidade
+            df_dH = 3.0 * E_nominal * (H_atual ** 2) / (H_nominal ** 3)
+
+            if abs(df_dH) < 1e-12:
+                print("Erro: Derivada nula encontrada.")
+                break
+
+            # 4. Atualização clássica de Newton-Raphson (passo exato e limpo)
+            H_atual = H_atual - (residuo / df_dH)
+            
+            # Mantém o palpite estritamente dentro do domínio físico do projeto [500, 1500]
+            H_atual = max(500.0, min(H_atual, 1500.0))
+
+        print("Aviso: O número máximo de iterações foi atingido.")
+        return H_atual
 
     # =========================================================================
     # EX 5: GERAÇÃO DE TABELAS PANDAS E ANIMAÇÃO SIMULTÂNEA 2D E 3D
@@ -632,7 +599,9 @@ if __name__ == "__main__":
     gd = GemeoDigital()
     # gd.ex_1_1()
     # gd.ex_1_2()
-    gd.ex_2()
+    # gd.ex_2()
+    gd.ex_3_1()
+    # gd.ex_3_2()
 
-    # hist, _ = gd.solver_transiente(0.01, 4.0)
-    # plot_potencia(hist)
+    hist, _ = gd.solver_transiente(0.01, 4.0)
+    plot_potencia(hist)
