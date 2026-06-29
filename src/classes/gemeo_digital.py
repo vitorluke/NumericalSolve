@@ -26,7 +26,7 @@ class GemeoDigital:
         self.H_k = 1e-3
 
         self.rede = RedeHidraulica(levels=levels_rede, H_k=self.H_k)
-        self.placa = PlacaTermica(Lx=0.03, Ly=0.015, Nx=61, Ny=31, k=0.25, R=0.0025, fonte_calor=5e5)
+        self.placa = PlacaTermica(Lx=0.03, Ly=0.015, Nx=241, Ny=121, k=0.25, R=0.0025, fonte_calor=5e5)
         self.membrana = MembranaElastica(N=51, R=0.0025)
         
         self.acop_hidrotermico  =  HidraulicoTermico(self.rede, self.placa)
@@ -58,21 +58,33 @@ class GemeoDigital:
     # =========================================================================
         # Ex 1.1 i RandomFail()
     def _RandomFail(self, p_O, f_obs):
-        C_modificado = self.condutancias_originais.copy()
+        hm = self.acop_hidromecanico
+
+        C_modificado = np.array(self.condutancias_originais, dtype=float, copy=True)
         C_modificado[np.random.rand(len(C_modificado)) < p_O] /= f_obs
+
+        self.rede.condutancias = C_modificado
+        self.rede.assembly()
+        
+        self.A_dim_pura = self.rede.matriz_global.copy()
+        A_scale = hm.pref / (hm.vref * (hm.R_dim**2))
+        A_adim_array = self.A_dim_pura.toarray() * A_scale
+        
+        A_adim_array[hm.nin, :] = 0.0
+        A_adim_array[hm.nin, hm.nin] = 1.0
+        
+        hm.A_adim = sp.csr_matrix(A_adim_array)
 
         return C_modificado
     
-    def _extrair_vazao(self):
+    def _extrair_vazao(self, pressao_inlet=None):
+        """Extrai a vazão permitindo alterar dinamicamente a pressão de entrada."""
+        p_in = pressao_inlet if pressao_inlet is not None else self.p_inlet
         try:
-            p_sol = self.rede.resolver(pressao_imposta={1: self.p_inlet, 6: 0.0})
-
+            p_sol = self.rede.resolver(pressao_imposta={1: p_in, 6: 0.0})
             row = self.rede.matriz_global.getrow(0)
-
             q = row @ p_sol
-
             return float(np.asarray(q).squeeze())
-
         except np.linalg.LinAlgError:
             return 0.0
     
@@ -90,7 +102,6 @@ class GemeoDigital:
 
         for i in range(1, N_amostras + 1):
             self.rede.condutancias = self._RandomFail(p_O=0.35, f_obs=5.0)
-            self.rede.assembly()
             vazao = self._extrair_vazao()
             if vazao < self.limite_critico:
                 falhas_criticas += 1
@@ -114,7 +125,7 @@ class GemeoDigital:
 
         # 1.1 iii Domínio de probabilidade
         
-        p_O_lin = np.linspace(0.05, 0.65, 7)
+        p_O_lin = np.linspace(0.05, 0.20, 7)
         Prob = {5: [], 10: []}
 
         for p_O in p_O_lin:
@@ -144,162 +155,101 @@ class GemeoDigital:
     # =========================================================================
     # EX 1.2 Análise Dinâmica do Gêmeo Digital Completo
     # =========================================================================
-    def solver_transiente(self, dt_hat, t_final_hat):
+    def solver_transiente(self, dt: float = None, time_end: float = None, ruido: bool = False):
+        if dt is None: dt = self.dt
+        if time_end is None: time_end = self.time_end
 
-        n_steps = int(t_final_hat / dt_hat)
-        t_hat = 0.0
-
-        acop = self.acop_hidromecanico
-
-        nm = acop.nm
-        np_nodes = acop.np_nodes
-        nin = acop.nin
-
-        w = np.zeros(nm)
-        v = np.zeros(nm)
-        p = np.zeros(np_nodes)
-
-        N = acop.N_mem
-        idx_monitor = (N // 2) + (N // 2) * N
-
-        dt = dt_hat
+        hm = self.acop_hidromecanico
+        n_m, n_p = hm.nm, hm.np_nodes
         idt = 1.0 / dt
+        h2 = hm.h_hat ** 2
 
-        pref = acop.pref
-        vref = acop.vref
-        R_dim = acop.R_dim
-        w0 = acop.w0
-
-        h2 = acop.h_hat ** 2
-        q_scale = vref * R_dim**2
-        power_scale = (pref**2) * 2.0 / R_dim
-
-        M = acop.M
-        uns = acop.uns
-
-        # cache funções (ganho leve mas real em loop Python)
-        temperaturas_medias_arestas = self.acop_hidrotermico.temperaturas_medias_arestas
-        calcular_viscosidade = self.acop_hidrotermico.calcular_viscosidade
-
-        I = sp.identity(nm, format='csr')
+        Iden = sp.identity(n_m, format="csr")
+        zero_m_p = sp.csr_matrix((n_m, n_p))
+        zero_p_m = sp.csr_matrix((n_p, n_m))
 
         blocks = [
-            [idt * I, -I, None],
-            [acop.K, idt * M + acop.D, -acop.U.T],
-            [None, acop.U * h2, acop.A_adim]
+            [idt * Iden, -Iden, zero_m_p],
+            [hm.K, (idt + hm.beta_hat) * hm.M, -hm.U.T],
+            [zero_p_m, h2 * idt * hm.U, idt * hm.A_adim],
         ]
+        A_global = sp.bmat(blocks, format="csc")
+        solver = spla.factorized(A_global)
 
-        Aglob = sp.bmat(blocks, format='csc')
-        solver = spla.factorized(Aglob)
+        n_steps = int(round(time_end / dt))
+        w = np.zeros(n_m)
+        v = np.zeros(n_m)
+        
+        hist = {'power': [], 't': []}
+        t = 0
 
-        b_global = np.zeros(2 * nm + np_nodes)
+        for _ in range(1, n_steps + 1):
+            p_inlet = self.p_inlet * (0.85 + 0.3 * np.random.rand()) if ruido else self.p_inlet
+            p_inlet_adim = p_inlet / hm.pref
 
-        hist = {
-            't': np.empty(n_steps),
-            'w_center': np.empty(n_steps),
-            'p_out': np.empty(n_steps),
-            'q_out': np.empty(n_steps),
-            'power': np.empty(n_steps),
-            'energy': np.empty(n_steps)
-        }
+            b_pressao = np.zeros(n_p)
+            b_pressao[hm.nin] = idt * p_inlet_adim
+            rhs = np.concatenate([idt * w, idt * (hm.M @ v), b_pressao])
 
-        energy = 0.0
+            solucao = solver(rhs)
+            w = solucao[:n_m]
+            v = solucao[n_m:2 * n_m]
+            p = solucao[2 * n_m:]
 
-        w_slice = slice(0, nm)
-        v_slice = slice(nm, 2 * nm)
-        p_slice = slice(2 * nm, 2 * nm + np_nodes)
+            vazao_membrana_adim = h2 * (hm.U @ v)
+            pot_inst = float((p_inlet_adim - p).T @ vazao_membrana_adim)
 
-        nin_idx = 2 * nm + nin
+            hist['power'].append(pot_inst)
+            hist['t'].append(t)
+            t += dt
 
-        for k in range(n_steps):
+        hist['power'] = np.array(hist['power'])
+        hist['t'] = np.array(hist['t'])
+        
+        trapz_func = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
+        energia_total = float(trapz_func(hist['power'], dx=dt))
 
-            # ----------------------------
-            # atualização térmica
-            # ----------------------------
-            T_med, _ = temperaturas_medias_arestas()
-            mu_med = calcular_viscosidade(T_med)
-
-            # rede ainda pode atualizar, mas NÃO entra mais na potência
-            self.rede.atualizar_condutancias(mu_med)
-
-            # ----------------------------
-            # RHS (sem overhead)
-            # ----------------------------
-            b_global[w_slice] = idt * w
-            b_global[v_slice] = idt * (M @ v)
-            b_global[p_slice] = 0.0
-            b_global[nin_idx] = self.p_inlet / pref
-
-            sol = solver(b_global)
-
-            w = sol[w_slice]
-            v = sol[v_slice]
-            p = sol[p_slice]
-
-            # ----------------------------
-            # métricas leves
-            # ----------------------------
-            p_out_dim = p[5] * pref
-
-            q_out_dim = h2 * (v @ uns) * q_scale
-
-            w_cen_dim = w[idx_monitor] * w0
-
-            # potência AGORA local (sem matriz global)
-            # substitui G @ p completamente
-            # usa interpretação de dissipação hidráulica simples:
-            P_inst = power_scale * np.sum((p[acop.nin] - p) ** 2)
-
-            energy += P_inst * dt
-
-            # ----------------------------
-            # histórico
-            # ----------------------------
-            hist['t'][k] = t_hat
-            hist['w_center'][k] = w_cen_dim
-            hist['p_out'][k] = p_out_dim
-            hist['q_out'][k] = q_out_dim
-            hist['power'][k] = P_inst
-            hist['energy'][k] = energy
-
-            t_hat += dt
-
-        return hist, (w, v, p, t_hat, energy)
+        print(energia_total)
+        
+        return hist, (w, v, p, None, energia_total)
     
-    def ex_1_2(self, p_O=0.20, f_obs=5.0):
+    def ex_1_2(self, p_O=0.50, f_obs=10.0):
         N_amostras = 2000
-        dt_values = [0.05, 0.1]
+        Prob = {0.05: [], 0.1: []}
 
-        for dt in dt_values:
+        for dt in Prob:
             print(f"[dt={dt}]")
-            X = np.linspace(1, N_amostras, N_amostras)
-            Y = []
             num = 0
             for i in range(1, N_amostras + 1):
                 self.rede.condutancias = self._RandomFail(p_O=p_O, f_obs=f_obs)
                 _, (_, _, _, _, energy) = self.solver_transiente(dt, 4.0)
 
-                if energy < 7:
+                if energy < 7.0:
                     num += 1
 
                 if i % 100 == 0:
                     print(f"{i}/{N_amostras}...")
 
-                Y.append(num / N_amostras * 100.0)
+                Prob[dt].append(num / i * 100.0)
 
-            Prob = num / N_amostras * 100.0
-            print(f"-> Probabilidade Final Estabilizada: {Prob:.2f}%")
+            Probf = num / N_amostras * 100.0
+            print(f"-> Probabilidade Final Estabilizada: {Probf:.2f}%")
 
-            plt.figure(figsize=(9,5))
-            plt.plot(X, Y)
-            plt.axhline(Prob, linestyle='--', label=f"Assíntota $\\approx {Prob:.2f}\\%$")
-            plt.ylim(0, 100)
-            plt.title("Convergência do método de Monte Carlo")
-            plt.xlabel("Iterações")
-            plt.ylabel("Probabilidade global $E<7.0$ (%)")
-            plt.legend()
-            plt.savefig(f"imagens/gêmeo digital/ex 1_2/{dt}.png")
-            plt.show()
+        X = np.linspace(1, N_amostras, N_amostras)
+        
+        plt.figure(figsize=(9,5))
+
+        for dt in Prob:
+            plt.plot(X, Prob[dt], label=f"dt={dt}")
+            plt.axhline(Prob[dt][-1], linestyle='--', label=f"Assíntota $\\approx {Prob[dt][-1]:.2f}\\%$")
+    
+        plt.ylim(0, 100)
+        plt.title("Convergência do método de Monte Carlo")
+        plt.xlabel("Iterações")
+        plt.ylabel("Probabilidade global $E<7.0$ (%)")
+        plt.legend()
+        plt.savefig(f"imagens/gêmeo digital/ex 1_2/a.png")
+        plt.show()
 
     # =========================================================================
     # EX 1 ESPECIAL: CAMPO TÉRMICO COM MICRO REATOR A 45°C
@@ -660,27 +610,7 @@ def plot_potencia(hist):
 # =============================================================================
 if __name__ == "__main__":
     gd = GemeoDigital()
-
-    # 1.1 Análise estacionária de falhas hidraulicas
-    # gd.ex_1_1()
-    
-    # 2. Resolve e projeta o campo térmico estático do reator
-    # gd.ex_1_especial()
-    
-    # 3. Executa a análise de sensibilidade varrendo os raios geométricos
-    # gd.ex_2_especial()
-    
-    # 4. Processa o acoplamento térmico-hidráulico nominal
-    # gd.ex_1()
-    
-    # 5. Executa os transientes estruturais mecânicos (Monolítico e Particionado)
     gd.ex_1_2()
 
-    # hist, _ = gd.solver_transiente(0.05, 4.0)
+    # hist, _ = gd.solver_transiente(0.01, 4.0)
     # plot_potencia(hist)
-    
-    # 6. Exibe os gráficos comparativos e a evolução temporal do erro relativo L2
-    # gd.ex_4()
-    
-    # 7. Imprime as tabelas analíticas no terminal e roda a animação dinâmica 2D e 3D síncrona
-    # gd.ex_5_analise_tabelas_e_animacao_completa()
