@@ -1,0 +1,9 @@
+--------------------------------------------------
+MÉTODO DE APROXIMAÇÃO          | ERRO NORMA L2
+--------------------------------------------------
+Spline Linear Local            | 0.000000
+Spline Cúbico Local            | 0.050644
+Polinomial Global (grau 03) | 3.161583
+Polinomial Global (grau 08) | 0.373263
+Polinomial Global (grau 15) | 0.189145
+--------------------------------------------------

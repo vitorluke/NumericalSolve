@@ -600,8 +600,8 @@ if __name__ == "__main__":
     # gd.ex_1_1()
     # gd.ex_1_2()
     # gd.ex_2()
-    gd.ex_3_1()
-    # gd.ex_3_2()
+    # gd.ex_3_1()
+    gd.ex_3_2()
 
     hist, _ = gd.solver_transiente(0.01, 4.0)
     plot_potencia(hist)
