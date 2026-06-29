@@ -7,7 +7,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import pandas as pd
 import time
 import warnings
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, CubicSpline
 
 # Ocultar avisos transientes e de otimização
 warnings.simplefilter('ignore')
@@ -248,7 +248,7 @@ class GemeoDigital:
         plt.xlabel("Iterações")
         plt.ylabel("Probabilidade global $E<7.0$ (%)")
         plt.legend()
-        plt.savefig(f"imagens/gêmeo digital/ex 1_2/a.png")
+        plt.savefig(f"imagens/gêmeo digital/ex 1_2.png")
         plt.show()
 
     # =========================================================================
@@ -359,56 +359,76 @@ class GemeoDigital:
     # =========================================================================
     # EX 2: ACOPLAMENTO HIDRÁULICO-MECÂNICO (MONOLÍTICO)
     # =========================================================================
-    def ex_2(self, dt=0.05, t_max=4.0):
-        print("\n" + "="*60)
-        print("EX 2: ACOPLAMENTO HIDRÁULICO-MECÂNICO (MONOLÍTICO)")
-        print("="*60)
-        nm, nv, rho_e, K_phys, M_phys, D_phys, I_mem, U_vec, A_rede_mod = self._setup_mecanico()
-        
-        block_11 = (1.0/dt) * I_mem
-        block_12 = -I_mem
-        block_13 = sp.csr_matrix((nm, nv))
-        block_21 = K_phys
-        block_22 = (1.0/dt) * M_phys + D_phys
-        col_indices = np.full(nm, nv - 1)
-        block_23 = sp.csr_matrix((-U_vec / rho_e, (np.arange(nm), col_indices)), shape=(nm, nv))
-        block_31 = sp.csr_matrix((nv, nm))
-        row_indices = np.full(nm, nv - 1)
-        block_32 = sp.csr_matrix((self.membrana.h_sq * U_vec, (row_indices, np.arange(nm))), shape=(nv, nm))
-        block_33 = sp.csr_matrix(A_rede_mod)
+    def ex_2(self):
+        hist, _ = self.solver_transiente(dt=0.05, time_end=4.0, ruido=True)
+        t_dados = hist['t']
+        P_dados = hist['power']
 
-        Mono_Mat = sp.bmat([[block_11, block_12, block_13],
-                            [block_21, block_22, block_23],
-                            [block_31, block_32, block_33]], format='csc')
-        mono_lu = spla.factorized(Mono_Mat)
-        
-        t_steps = np.arange(0, t_max + dt/2, dt)
-        w_mono, v_mono = np.zeros(nm), np.zeros(nm)
-        net_lu = spla.factorized(sp.csc_matrix(A_rede_mod))
-        b_init = np.zeros(nv); b_init[0] = 5000.0
-        p_init = net_lu(b_init)
-        
-        idx_centro = self.membrana.ij2n(self.membrana.N//2, self.membrana.N//2)
-        p_out_hist = [p_init[-1]]
-        w_c_hist = [0.0]
-        
-        print(f"[GD] Executando passo transiente Monolítico até {t_max}s...")
-        for t in t_steps[1:]:
-            b_mono = np.zeros(2*nm + nv)
-            b_mono[0:nm] = (1.0/dt) * w_mono
-            b_mono[nm:2*nm] = (1.0/dt) * v_mono
-            b_mono[2*nm] = 5000.0
-            
-            sol_mono = mono_lu(b_mono)
-            w_mono = sol_mono[0:nm]
-            v_mono = sol_mono[nm:2*nm]
-            p_mono = sol_mono[2*nm:]
-            
-            p_out_hist.append(p_mono[-1])
-            w_c_hist.append(w_mono[idx_centro])
-            
-        self.hist_mono = {'t': t_steps, 'p_out': p_out_hist, 'w_c': w_c_hist}
-        print("[GD] Resolução Monolítica concluída!")
+        # Garante que a malha fina use exatamente o limite dos dados gerados
+        t_fino = np.linspace(0, t_dados[-1], 500)
+
+        interp_linear = interp1d(t_dados, P_dados, kind='linear')
+        P_linear = interp_linear(t_fino)
+
+        interp_cubica = CubicSpline(t_dados, P_dados)
+        P_cubica = interp_cubica(t_fino)
+
+        graus_ajuste = [3, 8, 15]
+        polinomios_ajuste = {}
+        for m in graus_ajuste:
+            coefs = np.polyfit(t_dados, P_dados, deg=m)
+            polinomios_ajuste[m] = np.polyval(coefs, t_fino)
+
+        def calcular_erro_l2(p_aprox):
+            P_ref = np.interp(t_fino, t_dados, P_dados)
+            residuo_quad = (p_aprox - P_ref) ** 2
+            trapz_func = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
+            integral = trapz_func(residuo_quad, x=t_fino)
+            return np.sqrt(integral)
+
+        erro_linear = calcular_erro_l2(P_linear)
+        erro_cubica = calcular_erro_l2(P_cubica)
+
+        erros_polinomial = {}
+        for m in graus_ajuste:
+            erros_polinomial[m] = calcular_erro_l2(polinomios_ajuste[m])
+
+        plt.figure(figsize=(12, 8))
+        plt.plot(t_dados, P_dados, 'ko', alpha=0.5, label=r'Dados Originais Ruidosos $\mathcal{P}(t)$')
+        plt.plot(t_fino, P_linear, '-', label=f'Spline Linear ($L_2 = {erro_linear:.4f}$)', linewidth=1.5)
+        plt.plot(t_fino, P_cubica, '-', label=f'Spline Cúbico ($L_2 = {erro_cubica:.4f}$)', linewidth=1.5)
+
+        for m in graus_ajuste:
+            if m == 3:
+                lbl = f'Polinômio $m=3$ (Underfitting) ($L_2 = {erros_polinomial[m]:.4f}$)'
+            elif m == 15:
+                lbl = f'Polinômio $m=15$ (Overfitting) ($L_2 = {erros_polinomial[m]:.4f}$)'
+            else:
+                lbl = f'Polinômio $m={m}$ (Ajuste Ótimo) ($L_2 = {erros_polinomial[m]:.4f}$)'
+            plt.plot(t_fino, polinomios_ajuste[m], '--', label=lbl)
+
+        plt.title('Aproximação Numérica e Regressão da Potência Instantânea')
+        plt.xlabel('Tempo Adimensional ($t$)')
+        plt.ylabel('Potência $p(t)$')
+        plt.grid(True, linestyle=':', alpha=0.6)
+        plt.legend(loc='upper right')
+        plt.savefig("imagens/gêmeo digital/ex 2.png")
+        plt.show()
+
+        print("-" * 50)
+        print(f"{'MÉTODO DE APROXIMAÇÃO':<30} | {'ERRO NORMA L2':<15}")
+        print("-" * 50)
+        print(f"{'Spline Linear Local':<30} | {erro_linear:<15.6f}")
+        print(f"{'Spline Cúbico Local':<30} | {erro_cubica:<15.6f}")
+        for m in graus_ajuste:
+            print(f"Polinomial Global (grau {m:02d}) | {erros_polinomial[m]:<15.6f}")
+        print("-" * 50)
+
+        return {
+            'linear': erro_linear,
+            'cubica': erro_cubica,
+            'polinomial': erros_polinomial
+        }
 
     # =========================================================================
     # EX 3: ACOPLAMENTO HIDRÁULICO-MECÂNICO (PARTICIONADO)
@@ -610,7 +630,9 @@ def plot_potencia(hist):
 # =============================================================================
 if __name__ == "__main__":
     gd = GemeoDigital()
-    gd.ex_1_2()
+    # gd.ex_1_1()
+    # gd.ex_1_2()
+    gd.ex_2()
 
     # hist, _ = gd.solver_transiente(0.01, 4.0)
     # plot_potencia(hist)
