@@ -17,16 +17,22 @@ from src.classes.placa_termica import PlacaTermica
 from src.classes.membrana_elastica import MembranaElastica
 
 from src.classes.hidraulico_termico import HidraulicoTermico
+from src.classes.hidraulico_mecanico import HidraulicoMecanico
 
 class GemeoDigital:
     def __init__(self, levels_rede=3):
         """Inicializa o Gêmeo Digital instanciando as três físicas principais."""
         print("[GD] Inicializando os subsistemas físicos...")
-        self.rede = RedeHidraulica(levels=levels_rede, A_k=1.0e-6)
+        self.H_k = 1e-3
+
+        self.rede = RedeHidraulica(levels=levels_rede, H_k=self.H_k)
         self.placa = PlacaTermica(Lx=0.03, Ly=0.015, Nx=61, Ny=31, k=0.25, R=0.0025, fonte_calor=5e5)
         self.membrana = MembranaElastica(N=51, R=0.0025)
         
-        self.acop_termico = HidraulicoTermico(self.rede, self.placa)
+        self.acop_hidrotermico  =  HidraulicoTermico(self.rede, self.placa)
+        self.acop_hidromecanico = HidraulicoMecanico(self.rede, self.membrana)
+
+        self.p_inlet = 5e3
 
         # Estruturas para guardar o histórico temporal (Usado no ex_4)
         self.hist_mono = None
@@ -58,10 +64,15 @@ class GemeoDigital:
         return C_modificado
     
     def _extrair_vazao(self):
-        """Método auxiliar para extrair a vazão do nó de entrada isolando a bomba."""
         try:
-            p_sol = self.rede.resolver(pressao_imposta={1: 5e3, 6: 0.0})
-            return np.abs(np.dot(self.rede.matriz_global[0, :], p_sol))
+            p_sol = self.rede.resolver(pressao_imposta={1: self.p_inlet, 6: 0.0})
+
+            row = self.rede.matriz_global.getrow(0)
+
+            q = row @ p_sol
+
+            return float(np.asarray(q).squeeze())
+
         except np.linalg.LinAlgError:
             return 0.0
     
@@ -129,6 +140,166 @@ class GemeoDigital:
         plt.legend()
         plt.savefig("imagens/gêmeo digital/ex 1_1/iii.png")
         plt.show()
+
+    # =========================================================================
+    # EX 1.2 Análise Dinâmica do Gêmeo Digital Completo
+    # =========================================================================
+    def solver_transiente(self, dt_hat, t_final_hat):
+
+        n_steps = int(t_final_hat / dt_hat)
+        t_hat = 0.0
+
+        acop = self.acop_hidromecanico
+
+        nm = acop.nm
+        np_nodes = acop.np_nodes
+        nin = acop.nin
+
+        w = np.zeros(nm)
+        v = np.zeros(nm)
+        p = np.zeros(np_nodes)
+
+        N = acop.N_mem
+        idx_monitor = (N // 2) + (N // 2) * N
+
+        dt = dt_hat
+        idt = 1.0 / dt
+
+        pref = acop.pref
+        vref = acop.vref
+        R_dim = acop.R_dim
+        w0 = acop.w0
+
+        h2 = acop.h_hat ** 2
+        q_scale = vref * R_dim**2
+        power_scale = (pref**2) * 2.0 / R_dim
+
+        M = acop.M
+        uns = acop.uns
+
+        # cache funções (ganho leve mas real em loop Python)
+        temperaturas_medias_arestas = self.acop_hidrotermico.temperaturas_medias_arestas
+        calcular_viscosidade = self.acop_hidrotermico.calcular_viscosidade
+
+        I = sp.identity(nm, format='csr')
+
+        blocks = [
+            [idt * I, -I, None],
+            [acop.K, idt * M + acop.D, -acop.U.T],
+            [None, acop.U * h2, acop.A_adim]
+        ]
+
+        Aglob = sp.bmat(blocks, format='csc')
+        solver = spla.factorized(Aglob)
+
+        b_global = np.zeros(2 * nm + np_nodes)
+
+        hist = {
+            't': np.empty(n_steps),
+            'w_center': np.empty(n_steps),
+            'p_out': np.empty(n_steps),
+            'q_out': np.empty(n_steps),
+            'power': np.empty(n_steps),
+            'energy': np.empty(n_steps)
+        }
+
+        energy = 0.0
+
+        w_slice = slice(0, nm)
+        v_slice = slice(nm, 2 * nm)
+        p_slice = slice(2 * nm, 2 * nm + np_nodes)
+
+        nin_idx = 2 * nm + nin
+
+        for k in range(n_steps):
+
+            # ----------------------------
+            # atualização térmica
+            # ----------------------------
+            T_med, _ = temperaturas_medias_arestas()
+            mu_med = calcular_viscosidade(T_med)
+
+            # rede ainda pode atualizar, mas NÃO entra mais na potência
+            self.rede.atualizar_condutancias(mu_med)
+
+            # ----------------------------
+            # RHS (sem overhead)
+            # ----------------------------
+            b_global[w_slice] = idt * w
+            b_global[v_slice] = idt * (M @ v)
+            b_global[p_slice] = 0.0
+            b_global[nin_idx] = self.p_inlet / pref
+
+            sol = solver(b_global)
+
+            w = sol[w_slice]
+            v = sol[v_slice]
+            p = sol[p_slice]
+
+            # ----------------------------
+            # métricas leves
+            # ----------------------------
+            p_out_dim = p[5] * pref
+
+            q_out_dim = h2 * (v @ uns) * q_scale
+
+            w_cen_dim = w[idx_monitor] * w0
+
+            # potência AGORA local (sem matriz global)
+            # substitui G @ p completamente
+            # usa interpretação de dissipação hidráulica simples:
+            P_inst = power_scale * np.sum((p[acop.nin] - p) ** 2)
+
+            energy += P_inst * dt
+
+            # ----------------------------
+            # histórico
+            # ----------------------------
+            hist['t'][k] = t_hat
+            hist['w_center'][k] = w_cen_dim
+            hist['p_out'][k] = p_out_dim
+            hist['q_out'][k] = q_out_dim
+            hist['power'][k] = P_inst
+            hist['energy'][k] = energy
+
+            t_hat += dt
+
+        return hist, (w, v, p, t_hat, energy)
+    
+    def ex_1_2(self, p_O=0.20, f_obs=5.0):
+        N_amostras = 2000
+        dt_values = [0.05, 0.1]
+
+        for dt in dt_values:
+            print(f"[dt={dt}]")
+            X = np.linspace(1, N_amostras, N_amostras)
+            Y = []
+            num = 0
+            for i in range(1, N_amostras + 1):
+                self.rede.condutancias = self._RandomFail(p_O=p_O, f_obs=f_obs)
+                _, (_, _, _, _, energy) = self.solver_transiente(dt, 4.0)
+
+                if energy < 7:
+                    num += 1
+
+                if i % 100 == 0:
+                    print(f"{i}/{N_amostras}...")
+
+                Y.append(num / N_amostras * 100.0)
+
+            Prob = num / N_amostras * 100.0
+            print(f"-> Probabilidade Final Estabilizada: {Prob:.2f}%")
+
+            plt.figure(figsize=(9,5))
+            plt.plot(X, Y)
+            plt.axhline(Prob, linestyle='--', label=f"Assíntota $\\approx {Prob:.2f}\\%$")
+            plt.ylim(0, 100)
+            plt.title("Convergência do método de Monte Carlo")
+            plt.xlabel("Iterações")
+            plt.ylabel("Probabilidade global $E<7.0$ (%)")
+            plt.legend()
+            plt.savefig(f"imagens/gêmeo digital/ex 1_2/{dt}.png")
+            plt.show()
 
     # =========================================================================
     # EX 1 ESPECIAL: CAMPO TÉRMICO COM MICRO REATOR A 45°C
@@ -238,7 +409,7 @@ class GemeoDigital:
     # =========================================================================
     # EX 2: ACOPLAMENTO HIDRÁULICO-MECÂNICO (MONOLÍTICO)
     # =========================================================================
-    def ex_2(self, dt=0.5, t_max=50.0):
+    def ex_2(self, dt=0.05, t_max=4.0):
         print("\n" + "="*60)
         print("EX 2: ACOPLAMENTO HIDRÁULICO-MECÂNICO (MONOLÍTICO)")
         print("="*60)
@@ -454,14 +625,44 @@ class GemeoDigital:
         plt.tight_layout()
         plt.show()
 
+    def plot_p_out_history(self):
+        if not hasattr(self, "hist_mono"):
+            raise ValueError("Histórico não encontrado. Execute ex_2 primeiro.")
+
+        t = self.hist_mono["t"]
+        p_out = self.hist_mono["p_out"]
+
+        plt.figure()
+        plt.plot(t[:len(p_out)], p_out)
+        plt.xlabel("Tempo [s]")
+        plt.ylabel("p_out")
+        plt.title("Histórico de pressão de saída (p_out)")
+        plt.grid(True)
+        plt.show()
+
+def plot_potencia(hist):
+    t = np.array(hist['t'])
+    P = np.array(hist['power'])
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(t, P, color='red', linewidth=2)
+
+    plt.xlabel('Tempo')
+    plt.ylabel('Potência')
+    plt.title('Evolução da Potência Instantânea')
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
 # =============================================================================
 # Pipeline de Execução Sequencial do Sistema Completo
 # =============================================================================
 if __name__ == "__main__":
     gd = GemeoDigital()
-    
+
     # 1.1 Análise estacionária de falhas hidraulicas
-    gd.ex_1_1()
+    # gd.ex_1_1()
     
     # 2. Resolve e projeta o campo térmico estático do reator
     # gd.ex_1_especial()
@@ -473,8 +674,10 @@ if __name__ == "__main__":
     # gd.ex_1()
     
     # 5. Executa os transientes estruturais mecânicos (Monolítico e Particionado)
-    # gd.ex_2()
-    # gd.ex_3()
+    gd.ex_1_2()
+
+    # hist, _ = gd.solver_transiente(0.05, 4.0)
+    # plot_potencia(hist)
     
     # 6. Exibe os gráficos comparativos e a evolução temporal do erro relativo L2
     # gd.ex_4()

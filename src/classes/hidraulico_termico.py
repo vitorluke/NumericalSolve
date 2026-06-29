@@ -23,6 +23,9 @@ class HidraulicoTermico:
             fator_escala = 0.02 / max_x
             self.rede.posicoes_nos[:, 0] *= fator_escala
             self.rede.posicoes_nos[:, 1] *= fator_escala  # Mantém a proporção geométrica
+
+            self.rede.condutancias /= fator_escala
+            self.rede.matriz_global = None
             
         y_min = np.min(self.rede.posicoes_nos[:, 1])
         y_max = np.max(self.rede.posicoes_nos[:, 1])

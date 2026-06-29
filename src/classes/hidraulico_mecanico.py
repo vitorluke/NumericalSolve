@@ -7,13 +7,13 @@ from src.classes.membrana_elastica import MembranaElastica
 from src.classes.rede_hidraulica import RedeHidraulica
 
 class HidraulicoMecanico:
-    def __init__(self, N_mem=51, H_k=1000e-6, beta_hat=0.1, n_levels=3):
+    def __init__(self, rede, membrana, H_k=1000e-6, beta_hat=0.1):
         """
         Inicializa o modelo acoplado Hidráulico-Mecânico.
         """
         # Parâmetros Físicos Nominais
-        self.N_mem = N_mem
-        self.R_dim = 0.25e-2
+        self.N_mem = membrana.N
+        self.R_dim = membrana.R
         self.e_dim = 0.1e-3
         self.sigma = 200.0
         self.rho = 900.0
@@ -26,8 +26,8 @@ class HidraulicoMecanico:
         self.nout = 5
         
         # Inicialização das Componentes Isoladas
-        self.membrana = MembranaElastica(N=self.N_mem, R=self.R_dim)
-        self.rede = RedeHidraulica(levels=n_levels)
+        self.membrana = membrana
+        self.rede = rede
         
         self.nm = self.membrana.nunk
         self.np_nodes = self.rede.numero_nos
@@ -41,6 +41,17 @@ class HidraulicoMecanico:
         self.h_hat = 2.0 / (self.N_mem - 1)
         
         self._preparar_matrizes()
+
+    @classmethod
+    def instantiate_subsystems(cls, N_mem=51, H_k=1000e-6, beta_hat=0.1, n_levels=3):
+        """
+        Inicializa o modelo acoplado Hidráulico-Mecânico.
+        """
+        # Inicialização das Componentes Isoladas
+        membrana = MembranaElastica(N=N_mem, R=0.25e-2)
+        rede = RedeHidraulica(levels=n_levels)
+        
+        return cls(rede, membrana, H_k, beta_hat)
 
     def _preparar_matrizes(self):
         """
@@ -76,23 +87,36 @@ class HidraulicoMecanico:
         self.D = self.beta_hat * self.M
         
         # 3. Matriz de Acoplamento U
-        U = np.zeros((self.np_nodes, self.nm))
         self.uns = np.ones(self.nm)
-        
+
         for i in range(self.N_mem):
             for j in range(self.N_mem):
                 idx = i + j * self.N_mem
+
                 x = i * self.h_hat - 1.0
                 y = j * self.h_hat - 1.0
-                dist_sq = x**2 + y**2
-                
-                # Zera nós fora do contorno circular e nas bordas rígidas quadradas
-                if dist_sq > 1.0 or i == 0 or i == self.N_mem-1 or j == 0 or j == self.N_mem-1:
-                    self.uns[idx] = 0.0
-                    
-        U[self.nout, :] = self.uns
-        self.U = sp.csr_matrix(U)
 
+                if (
+                    x*x + y*y > 1.0
+                    or i == 0
+                    or i == self.N_mem - 1
+                    or j == 0
+                    or j == self.N_mem - 1
+                ):
+                    self.uns[idx] = 0.0
+
+        cols = np.nonzero(self.uns)[0]
+
+        self.U = sp.csr_matrix(
+            (
+                self.uns[cols],
+                (
+                    np.full_like(cols, self.nout),
+                    cols
+                )
+            ),
+            shape=(self.np_nodes, self.nm)
+        )
     def solver_transiente(self, dt_hat, t_final_hat, p_inlet_func, estado_inicial=None, idx_monitor=None):
         """
         Resolvedor dinâmico utilizando Euler Implícito em blocos.
