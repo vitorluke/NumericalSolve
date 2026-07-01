@@ -754,6 +754,26 @@ class GemeoDigital:
         plt.savefig("imagens/gêmeo digital/ex3_volume.png")
         plt.show()
 
+        erro_ct = dE_an_H - dE_ct_H
+        erro_fw = dE_an_H - dE_fw_H
+
+        erro_abs_medio_ct = np.mean(np.abs(erro_ct))
+        erro_abs_medio_fw = np.mean(np.abs(erro_fw))
+
+        erro_rel_l2_ct = np.linalg.norm(erro_ct) / np.linalg.norm(dE_ct_H)
+        erro_rel_l2_fw = np.linalg.norm(erro_fw) / np.linalg.norm(dE_fw_H)
+
+        erro_max_ct = np.max(np.abs(erro_ct))
+        erro_max_fw = np.max(np.abs(erro_fw))
+
+        print("\nComparação dE/dH")
+        print(f"Erro médio absoluto (centrada):    {erro_abs_medio_ct:.6e}")
+        print(f"Erro médio absoluto (forward):     {erro_abs_medio_fw:.6e}")
+        print(f"Erro relativo L2 (centrada):       {100*erro_rel_l2_ct:.4f}%")
+        print(f"Erro relativo L2 (forward):        {100*erro_rel_l2_fw:.4f}%")
+        print(f"Erro máximo absoluto (centrada):   {erro_max_ct:.6e}")
+        print(f"Erro máximo absoluto (forward):    {erro_max_fw:.6e}")
+
         return {
             'TC': (TC_vec, E_TC, q_TC, V_TC,
                 dE_fw_TC, dE_ct_TC,
