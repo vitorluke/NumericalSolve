@@ -652,64 +652,106 @@ class GemeoDigital:
             break  # remove após diagnóstico
             # ---------------------------------------------------------
 
-        # ------------------------------------------------------------------
-        # GRÁFICOS
-        # ------------------------------------------------------------------
-        fig, axs = plt.subplots(3, 2, figsize=(15, 15))
-        fig.suptitle('EX 3.1 — Análise de Sensibilidade Paramétrica',
-                    fontsize=14, fontweight='bold')
+        # ==========================================================
+        # ENERGIA
+        # ==========================================================
+        fig, axs = plt.subplots(2, 2, figsize=(12, 8))
 
-        # (0,0) Métricas vs TC
-        axs[0,0].plot(TC_vec, E_TC,  'r-',  label=r'$\mathcal{E}$')
-        axs[0,0].plot(TC_vec, q_TC,  'g-.', label=r'$q_{\rm inlet}$')
-        axs[0,0].plot(TC_vec, V_TC,  'b--', label=r'$V(t_f)$')
-        axs[0,0].set_title(r'Métricas vs $T_C$')
+        axs[0,0].plot(TC_vec, E_TC, lw=2)
+        axs[0,0].set_title(r'Energia $\mathcal{E}$ vs $T_C$')
         axs[0,0].set_xlabel(r'$T_C$ (°C)')
-        axs[0,0].legend(); axs[0,0].grid(True, linestyle=':')
+        axs[0,0].grid(True)
 
-        # (0,1) Derivadas vs TC
-        axs[0,1].plot(TC_vec, dE_fw_TC, 'r-',  lw=3, alpha=0.6, label=r'FWD $\partial\mathcal{E}/\partial T_C$')
-        axs[0,1].plot(TC_vec, dE_ct_TC, 'r--', lw=2,             label=r'CTD $\partial\mathcal{E}/\partial T_C$')
-        axs[0,1].plot(TC_vec, dq_fw_TC, 'g-',  lw=3, alpha=0.6, label=r'FWD $\partial q/\partial T_C$')
-        axs[0,1].plot(TC_vec, dq_ct_TC, 'g--', lw=2,             label=r'CTD $\partial q/\partial T_C$')
-        axs[0,1].plot(TC_vec, dV_fw_TC, 'b-',  lw=3, alpha=0.6, label=r'FWD $\partial V/\partial T_C$')
-        axs[0,1].plot(TC_vec, dV_ct_TC, 'b--', lw=2,             label=r'CTD $\partial V/\partial T_C$')
-        axs[0,1].set_title(r'Derivadas vs $T_C$ (diferenças finitas)')
+        axs[0,1].plot(TC_vec, dE_fw_TC, label='Forward')
+        axs[0,1].plot(TC_vec, dE_ct_TC, '--', label='Centered')
+        axs[0,1].set_title(r'$\partial \mathcal{E}/\partial T_C$')
         axs[0,1].set_xlabel(r'$T_C$ (°C)')
-        axs[0,1].legend(fontsize=7); axs[0,1].grid(True, linestyle=':')
+        axs[0,1].legend()
+        axs[0,1].grid(True)
 
-        # (1,0) Métricas vs H
-        axs[1,0].plot(H_vec, E_H,  'r-',  label=r'$\mathcal{E}$')
-        axs[1,0].plot(H_vec, q_H,  'g-.', label=r'$q_{\rm inlet}$')
-        axs[1,0].plot(H_vec, V_H,  'b--', label=r'$V(t_f)$')
-        axs[1,0].set_title(r'Métricas vs $H$')
-        axs[1,0].set_xlabel(r'$H$ (μm)')
-        axs[1,0].legend(); axs[1,0].grid(True, linestyle=':')
+        axs[1,0].plot(H_vec, E_H, lw=2)
+        axs[1,0].set_title(r'Energia $\mathcal{E}$ vs $H$')
+        axs[1,0].set_xlabel(r'$H$ ($\mu$m)')
+        axs[1,0].grid(True)
 
-        # (1,1) dE/dH: numérico vs analítico
-        axs[1,1].plot(H_vec, dE_fw_H, 'g-',  lw=4, alpha=0.5, label=r'FWD $\partial\mathcal{E}/\partial H$')
-        axs[1,1].plot(H_vec, dE_ct_H, 'g--', lw=2,             label=r'CTD $\partial\mathcal{E}/\partial H$')
-        axs[1,1].plot(H_vec, dE_an_H, 'r-',  lw=2,             label=r'Analítico (Eq. 6.17 adaptada)')
-        axs[1,1].set_title(r'$\partial\mathcal{E}/\partial H$: Numérico vs Analítico')
-        axs[1,1].set_xlabel(r'$H$ (μm)')
-        axs[1,1].legend(); axs[1,1].grid(True, linestyle=':')
-
-        # (2,0) dq/dH: numérico vs analítico
-        axs[2,0].plot(H_vec, dq_fw_H, 'm-',  lw=4, alpha=0.5, label=r'FWD $\partial q/\partial H$')
-        axs[2,0].plot(H_vec, dq_an_H, 'k--', lw=2,             label=r'Analítico $\partial q/\partial H$')
-        axs[2,0].set_title(r'$\partial q_{\rm inlet}/\partial H$: Numérico vs Analítico')
-        axs[2,0].set_xlabel(r'$H$ (μm)')
-        axs[2,0].legend(); axs[2,0].grid(True, linestyle=':')
-
-        # (2,1) dV/dH: numérico vs analítico
-        axs[2,1].plot(H_vec, dV_fw_H, 'c-',  lw=4, alpha=0.5, label=r'FWD $\partial V/\partial H$')
-        axs[2,1].plot(H_vec, dV_an_H, 'b--', lw=2,             label=r'Analítico $\partial V/\partial H$')
-        axs[2,1].set_title(r'$\partial V(t_f)/\partial H$: Numérico vs Analítico')
-        axs[2,1].set_xlabel(r'$H$ (μm)')
-        axs[2,1].legend(); axs[2,1].grid(True, linestyle=':')
+        axs[1,1].plot(H_vec, dE_fw_H, alpha=0.5, lw=4, label='Forward')
+        axs[1,1].plot(H_vec, dE_ct_H, '--', label='Centered')
+        axs[1,1].plot(H_vec, dE_an_H, lw=2, label='Analítica')
+        axs[1,1].set_title(r'$\partial \mathcal{E}/\partial H$')
+        axs[1,1].set_xlabel(r'$H$ ($\mu$m)')
+        axs[1,1].legend()
+        axs[1,1].grid(True)
 
         plt.tight_layout()
-        plt.savefig("imagens/gêmeo digital/ex 3_1.png")
+        plt.savefig("imagens/gêmeo digital/ex3_energia.png")
+        plt.show()
+
+
+        # ==========================================================
+        # VAZÃO
+        # ==========================================================
+        fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+
+        axs[0,0].plot(TC_vec, q_TC, lw=2)
+        axs[0,0].set_title(r'$q_{inlet}$ vs $T_C$')
+        axs[0,0].set_xlabel(r'$T_C$ (°C)')
+        axs[0,0].grid(True)
+
+        axs[0,1].plot(TC_vec, dq_fw_TC, label='Forward')
+        axs[0,1].plot(TC_vec, dq_ct_TC, '--', label='Centered')
+        axs[0,1].set_title(r'$\partial q/\partial T_C$')
+        axs[0,1].set_xlabel(r'$T_C$ (°C)')
+        axs[0,1].legend()
+        axs[0,1].grid(True)
+
+        axs[1,0].plot(H_vec, q_H, lw=2)
+        axs[1,0].set_title(r'$q_{inlet}$ vs $H$')
+        axs[1,0].set_xlabel(r'$H$ ($\mu$m)')
+        axs[1,0].grid(True)
+
+        axs[1,1].plot(H_vec, dq_fw_H, alpha=0.5, lw=4, label='Forward')
+        axs[1,1].plot(H_vec, dq_an_H, lw=2, label='Analítica')
+        axs[1,1].set_title(r'$\partial q/\partial H$')
+        axs[1,1].set_xlabel(r'$H$ ($\mu$m)')
+        axs[1,1].legend()
+        axs[1,1].grid(True)
+
+        plt.tight_layout()
+        plt.savefig("imagens/gêmeo digital/ex3_vazao.png")
+        plt.show()
+
+
+        # ==========================================================
+        # VOLUME
+        # ==========================================================
+        fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+
+        axs[0,0].plot(TC_vec, V_TC, lw=2)
+        axs[0,0].set_title(r'$V(t_f)$ vs $T_C$')
+        axs[0,0].set_xlabel(r'$T_C$ (°C)')
+        axs[0,0].grid(True)
+
+        axs[0,1].plot(TC_vec, dV_fw_TC, label='Forward')
+        axs[0,1].plot(TC_vec, dV_ct_TC, '--', label='Centered')
+        axs[0,1].set_title(r'$\partial V/\partial T_C$')
+        axs[0,1].set_xlabel(r'$T_C$ (°C)')
+        axs[0,1].legend()
+        axs[0,1].grid(True)
+
+        axs[1,0].plot(H_vec, V_H, lw=2)
+        axs[1,0].set_title(r'$V(t_f)$ vs $H$')
+        axs[1,0].set_xlabel(r'$H$ ($\mu$m)')
+        axs[1,0].grid(True)
+
+        axs[1,1].plot(H_vec, dV_fw_H, alpha=0.5, lw=4, label='Forward')
+        axs[1,1].plot(H_vec, dV_an_H, lw=2, label='Analítica')
+        axs[1,1].set_title(r'$\partial V/\partial H$')
+        axs[1,1].set_xlabel(r'$H$ ($\mu$m)')
+        axs[1,1].legend()
+        axs[1,1].grid(True)
+
+        plt.tight_layout()
+        plt.savefig("imagens/gêmeo digital/ex3_volume.png")
         plt.show()
 
         return {
@@ -795,8 +837,8 @@ if __name__ == "__main__":
     gd = GemeoDigital()
     # gd.ex_1_1()
     # gd.ex_1_2()
-    gd.ex_2()
-    # gd.ex_3_1()
+    # gd.ex_2()
+    gd.ex_3_1()
     # gd.ex_3_2()
 
     hist, _ = gd.solver_transiente(0.01, 4.0)
