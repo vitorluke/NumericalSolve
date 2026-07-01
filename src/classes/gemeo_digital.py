@@ -286,26 +286,96 @@ class GemeoDigital:
         for m in graus_ajuste:
             erros_polinomial[m] = calcular_erro_l2(polinomios_ajuste[m])
 
-        plt.figure(figsize=(12, 8))
-        plt.plot(t_dados, P_dados, 'ko', alpha=0.5, label=r'Dados Originais Ruidosos $\mathcal{P}(t)$')
-        plt.plot(t_fino, P_linear, '-', label=f'Spline Linear ($L_2 = {erro_linear:.4f}$)', linewidth=1.5)
-        plt.plot(t_fino, P_cubica, '-', label=f'Spline Cúbico ($L_2 = {erro_cubica:.4f}$)', linewidth=1.5)
-
-        for m in graus_ajuste:
-            if m == 3:
-                lbl = f'Polinômio $m=3$ (Underfitting) ($L_2 = {erros_polinomial[m]:.4f}$)'
-            elif m == 15:
-                lbl = f'Polinômio $m=15$ (Overfitting) ($L_2 = {erros_polinomial[m]:.4f}$)'
-            else:
-                lbl = f'Polinômio $m={m}$ (Ajuste Ótimo) ($L_2 = {erros_polinomial[m]:.4f}$)'
-            plt.plot(t_fino, polinomios_ajuste[m], '--', label=lbl)
-
-        plt.title('Aproximação Numérica e Regressão da Potência Instantânea')
+        # ------------------------------------------------------------------
+        # Underfitting (m = 3)
+        # ------------------------------------------------------------------
+        plt.figure(figsize=(10, 5))
+        plt.plot(t_dados, P_dados, 'ko', alpha=0.5,
+                label=r'Dados Originais $\mathcal{P}(t)$')
+        plt.plot(
+            t_fino,
+            polinomios_ajuste[3],
+            '--',
+            linewidth=2,
+            label=f'Polinômio grau 3 ($L_2={erros_polinomial[3]:.4f}$)'
+        )
+        plt.title('Underfitting — Regressão Polinomial de Grau 3')
         plt.xlabel('Tempo Adimensional ($t$)')
         plt.ylabel('Potência $p(t)$')
         plt.grid(True, linestyle=':', alpha=0.6)
-        plt.legend(loc='upper right')
-        plt.savefig("imagens/gêmeo digital/ex 2.png")
+        plt.legend()
+        plt.savefig("imagens/gêmeo digital/ex 2_underfitting.png")
+        plt.show()
+
+        # ------------------------------------------------------------------
+        # Ajuste ótimo (m = 8)
+        # ------------------------------------------------------------------
+        plt.figure(figsize=(10, 5))
+        plt.plot(t_dados, P_dados, 'ko', alpha=0.5,
+                label=r'Dados Originais $\mathcal{P}(t)$')
+        plt.plot(
+            t_fino,
+            polinomios_ajuste[8],
+            '--',
+            linewidth=2,
+            label=f'Polinômio grau 8 ($L_2={erros_polinomial[8]:.4f}$)'
+        )
+        plt.title('Ajuste Ótimo — Regressão Polinomial de Grau 8')
+        plt.xlabel('Tempo Adimensional ($t$)')
+        plt.ylabel('Potência $p(t)$')
+        plt.grid(True, linestyle=':', alpha=0.6)
+        plt.legend()
+        plt.savefig("imagens/gêmeo digital/ex 2_otimo.png")
+        plt.show()
+
+        # ------------------------------------------------------------------
+        # Overfitting (m = 15)
+        # ------------------------------------------------------------------
+        plt.figure(figsize=(10, 5))
+        plt.plot(t_dados, P_dados, 'ko', alpha=0.5,
+                label=r'Dados Originais $\mathcal{P}(t)$')
+        plt.plot(
+            t_fino,
+            polinomios_ajuste[15],
+            '--',
+            linewidth=2,
+            label=f'Polinômio grau 15 ($L_2={erros_polinomial[15]:.4f}$)'
+        )
+        plt.title('Overfitting — Regressão Polinomial de Grau 15')
+        plt.xlabel('Tempo Adimensional ($t$)')
+        plt.ylabel('Potência $p(t)$')
+        plt.grid(True, linestyle=':', alpha=0.6)
+        plt.legend()
+        plt.savefig("imagens/gêmeo digital/ex 2_overfitting.png")
+        plt.show()
+
+        # ------------------------------------------------------------------
+        # Comparação dos Splines
+        # ------------------------------------------------------------------
+        plt.figure(figsize=(10, 5))
+        plt.plot(t_dados, P_dados, 'ko', alpha=0.5,
+                label=r'Dados Originais $\mathcal{P}(t)$')
+
+        plt.plot(
+            t_fino,
+            P_linear,
+            linewidth=2,
+            label=f'Spline Linear ($L_2={erro_linear:.4f}$)'
+        )
+
+        plt.plot(
+            t_fino,
+            P_cubica,
+            linewidth=2,
+            label=f'Spline Cúbico ($L_2={erro_cubica:.4f}$)'
+        )
+
+        plt.title('Interpolação Local por Splines')
+        plt.xlabel('Tempo Adimensional ($t$)')
+        plt.ylabel('Potência $p(t)$')
+        plt.grid(True, linestyle=':', alpha=0.6)
+        plt.legend()
+        plt.savefig("imagens/gêmeo digital/ex 2_splines.png")
         plt.show()
 
         print("-" * 50)
@@ -324,122 +394,334 @@ class GemeoDigital:
         }
 
     def ex_3_1(self):
-        # 30 pontos conforme exigido pelo enunciado do projeto
-        TC_vetor = np.linspace(0.0, 250.0, 30)
-        H_vetor = np.linspace(500.0, 1500.0, 30)
-        
-        # Deltas calibrados para evitar ruído numérico de máquina (10^-12)
-        dTC = 1.0  
-        dH = 1.0
+        print("\n" + "="*70)
+        print("EX 3.1: ANÁLISE DE SENSIBILIDADE PARAMÉTRICA")
+        print("="*70)
 
-        res_TC = {'TC': TC_vetor, 'E': [], 'q': [], 'V': [], 'dE_fw': [], 'dE_ct': []}
-        res_H = {
-            'H': H_vetor, 'E': [], 'q': [], 'V': [], 
-            'dE_fw': [], 'dE_ct': [], 'dE_analitica': [],
-            'dq_fw': [], 'dV_fw': []
-        }
+        hm  = self.acop_hidromecanico
+        n_m = hm.nm
+        n_p = hm.np_nodes
+        dt  = 0.05
+        T_f = 4.0
+        idt = 1.0 / dt
+        h2  = hm.h_hat ** 2
 
-        # 1. Executa o solver na condição nominal para obter as bases adimensionais estáveis
-        hist_base, (_, _, _, _, E_nominal) = self.solver_transiente(dt=0.05, time_end=4.0, ruido=False)
-        
-        trapz_func = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
-        q_nominal = float(np.mean(hist_base['power']))
-        V_nominal = float(trapz_func(hist_base['power'], dx=0.05))
+        A_ref = hm.A_adim.copy()
 
-        # --- MODELO DE ESCALA FÍSICA ACOPLADA (LIVRE DE RUÍDO DE MÁQUINA) ---
-        def avaliar_proporcionalidade(TC_val, H_val):
-            fator_H = H_val / 1000.0
-            # Decaimento térmico real para evitar flutuações numéricas de 10^-12
-            fator_TC = np.exp(-0.0025 * (TC_val - 125.0))
+        # ------------------------------------------------------------------
+        # Viscosidade
+        # ------------------------------------------------------------------
+        def mu(T):
+            return 0.001791 / (1.0 + 0.03368 * T + 0.000221 * T**2)
 
-            E = E_nominal * (fator_H ** 3) * fator_TC
-            q = q_nominal * (fator_H ** 3) * fator_TC
-            V = V_nominal * (fator_H ** 3) * fator_TC
-            
-            return E, q, V
+        # ------------------------------------------------------------------
+        # Escalonamento de A
+        # ------------------------------------------------------------------
+        def A_scale(fator):
+            """Com Dirichlet — usada no solver."""
+            A = A_ref.multiply(fator).tolil()
+            A[hm.nin, :] = 0.0
+            A[hm.nin, hm.nin] = 1.0
+            return A.tocsr()
 
-        # --- Varredura Paramétrica da Temperatura TC ---
-        H_fixo = 1000.0
-        for tc in TC_vetor:
-            E_0, q_0, V_0 = avaliar_proporcionalidade(tc, H_fixo)
-            E_f, _, _ = avaliar_proporcionalidade(tc + dTC, H_fixo)
-            E_b, _, _ = avaliar_proporcionalidade(tc - dTC, H_fixo)
-            
-            res_TC['E'].append(E_0)
-            res_TC['q'].append(q_0)
-            res_TC['V'].append(V_0)
-            res_TC['dE_fw'].append((E_f - E_0) / dTC)
-            res_TC['dE_ct'].append((E_f - E_b) / (2.0 * dTC))
+        def A_scale_fisica(fator):
+            """Sem Dirichlet — usada para extração de vazão física."""
+            return A_ref.multiply(fator).tocsr()
 
-        # --- Varredura Paramétrica da Largura H ---
-        TC_fixo = 125.0
-        for h in H_vetor:
-            E_0, q_0, V_0 = avaliar_proporcionalidade(TC_fixo, h)
-            E_f, q_f, V_f = avaliar_proporcionalidade(TC_fixo, h + dH)
-            E_b, q_b, V_b = avaliar_proporcionalidade(TC_fixo, h - dH)
-            
-            res_H['E'].append(E_0)
-            res_H['q'].append(q_0)
-            res_H['V'].append(V_0)
-            
-            res_H['dE_fw'].append((E_f - E_0) / dH)
-            res_H['dE_ct'].append((E_f - E_b) / (2.0 * dH))
-            res_H['dq_fw'].append((q_f - q_0) / dH)
-            res_H['dV_fw'].append((V_f - V_0) / dH)
-            
-            # Derivada Analítica Exata em relação a H (Abordagem Contínua)
-            fator_TC_fixo = np.exp(-0.0025 * (TC_fixo - 125.0))
-            dE_analitica_val = 3.0 * E_nominal * (h ** 2) / (1000.0 ** 3) * fator_TC_fixo
-            res_H['dE_analitica'].append(dE_analitica_val)
+        def A_para_TC(TC, TC_ref=125.0):
+            f = mu(TC_ref) / mu(TC)
+            return A_scale(f), A_scale_fisica(f)
 
-        # Conversão para arrays estruturados do NumPy
-        for k in res_TC: res_TC[k] = np.array(res_TC[k])
-        for k in res_H: res_H[k] = np.array(res_H[k])
+        def A_para_H(H_um, H_ref=1000.0):
+            f = (H_um / H_ref)**4
+            return A_scale(f), A_scale_fisica(f)
 
-        # --- GERAÇÃO DOS GRÁFICOS CORRIGIDOS E LIMPOS ---
-        import matplotlib.pyplot as plt
-        fig, axs = plt.subplots(2, 2, figsize=(14, 10))
-        
-        # Quadrante 1: Métricas vs TC
-        axs[0, 0].plot(res_TC['TC'], res_TC['E'], 'r-', label=r'Energia $\mathcal{E}$')
-        axs[0, 0].plot(res_TC['TC'], res_TC['V'], 'b--', label=r'Volume $V(t_f)$')
-        axs[0, 0].set_title('Métricas do Sistema vs Temperatura ($T_C$)')
-        axs[0, 0].set_xlabel(r'$T_C$ ($^\circ$C)')
-        axs[0, 0].grid(True, linestyle=':')
-        axs[0, 0].legend()
+        # ------------------------------------------------------------------
+        # Motor numérico
+        # ------------------------------------------------------------------
+        def _solver(A_local, A_fisica, H_um=None):
+            """
+            Resolve o sistema acoplado com Euler implícito.
+            H_um != None  →  calcula sensibilidades analíticas dY/dH.
 
-        # Quadrante 2: Sensibilidade da Energia vs TC (Livre de ruído de máquina!)
-        axs[0, 1].plot(res_TC['TC'], res_TC['dE_fw'], 'g-', label='Diferença Progressiva')
-        axs[0, 1].plot(res_TC['TC'], res_TC['dE_ct'], 'k:', label='Diferença Centrada')
-        axs[0, 1].set_title(r'Sensibilidade Suave: $\partial \mathcal{E} / \partial T_C$')
-        axs[0, 1].set_xlabel(r'$T_C$ ($^\circ$C)')
-        axs[0, 1].grid(True, linestyle=':')
-        axs[0, 1].legend()
+            Definições e expressões analíticas:
+            ─────────────────────────────────────────────────────────────
+            Potência:   P(t)  = (p_in - p) · (h²·U·v)
+            Energia:    E     = Σ P(t)·dt   [trapézio]
 
-        # Quadrante 3: Métricas vs H
-        axs[1, 0].plot(res_H['H'], res_H['E'], 'r-', label=r'Energia $\mathcal{E}$')
-        axs[1, 0].plot(res_H['H'], res_H['q'], 'g-.', label=r'Vazão $q_{\text{inlet}}$')
-        axs[1, 0].plot(res_H['H'], res_H['V'], 'b--', label=r'Volume $V(t_f)$')
-        axs[1, 0].set_title('Métricas do Sistema vs Largura ($H$)')
-        axs[1, 0].set_xlabel(r'$H$ ($\mu$m)')
-        axs[1, 0].grid(True, linestyle=':')
-        axs[1, 0].legend()
+            dP/dH = (p_in - p)·(h²·U·sv) - sp·(h²·U·v)   [regra produto]
+            dE/dH = Σ dP/dH · dt
 
-        # Quadrante 4: Análise Comparativa Clara e Organizada
-        axs[1, 1].plot(res_H['H'], res_H['dE_fw'], 'g-', label=r'Forward $\partial \mathcal{E} / \partial H$')
-        axs[1, 1].plot(res_H['H'], res_H['dE_analitica'], 'r--', linewidth=2, label='Abordagem Contínua')
-        axs[1, 1].plot(res_H['H'], res_H['dq_fw'], 'm-.', label=r'$\partial q_{\text{inlet}} / \partial H$')
-        axs[1, 1].plot(res_H['H'], res_H['dV_fw'], 'c:', label=r'$\partial V(t_f) / \partial H$')
-        axs[1, 1].set_title('Análise Comparativa de Sensibilidades vs Geometria')
-        axs[1, 1].set_xlabel(r'$H$ ($\mu$m)')
-        axs[1, 1].grid(True, linestyle=':')
-        axs[1, 1].legend()
+            q_inlet = A_fisica[nin,:] · p                  [linha sem Dirichlet]
+            dq/dH   = dA_fisica/dH[nin,:] · p
+                    + A_fisica[nin,:] · sp                  [regra produto]
+
+            V(tf)  = h² · (uns · w)                        [nós interiores]
+            dV/dH  = h² · (uns · sw)
+
+            Condição de Dirichlet nas sensibilidades:
+            - dA/dH tem linha nin zerada (p[nin] prescrito, independe de H)
+            - sp[nin] = 0 após cada passo  (dp[nin]/dH = 0 por definição)
+            ─────────────────────────────────────────────────────────────
+            """
+            # Reconstrói A_ref do zero com H=1000 μm garantido
+            H_ref = 1000e-6  # metros
+            mu_ref = 5e-4
+            kappa_ref = (np.pi * H_ref**4) / (128 * mu_ref)
+
+            C_ref = []
+            for (i, j) in self.rede.conectividade:
+                n1 = self.rede.posicoes_nos[i]
+                n2 = self.rede.posicoes_nos[j]
+                L  = np.sqrt((n1[0]-n2[0])**2 + (n1[1]-n2[1])**2)
+                C_ref.append(kappa_ref / L)
+
+            C_ref = np.array(C_ref)
+
+            calc_sens = H_um is not None
+
+            Iden    = sp.identity(n_m, format="csr")
+            zero_mp = sp.csr_matrix((n_m, n_p))
+            zero_pm = sp.csr_matrix((n_p, n_m))
+
+            blocks = [
+                [idt * Iden,  -Iden,                       zero_mp      ],
+                [hm.K,        (idt + hm.beta_hat) * hm.M,  -hm.U.T     ],
+                [zero_pm,     h2 * idt * hm.U,              idt * A_local],
+            ]
+            G      = sp.bmat(blocks, format="csc")
+            solveG = spla.factorized(G)
+
+            n_steps = int(round(T_f / dt))
+
+            w = np.zeros(n_m);  v = np.zeros(n_m)
+            sw = np.zeros(n_m); sv = np.zeros(n_m); sp_vec = np.zeros(n_p)
+
+            p_adim = self.p_inlet / hm.pref
+            b_p    = np.zeros(n_p)
+            b_p[hm.nin] = idt * p_adim
+
+            # dA/dH = (4/H)·A  [Eq. 6.16]
+            # A linha nin é zerada: p[nin] é prescrito, não depende de H
+            if calc_sens:
+                dA_dH = A_local.multiply(4.0 / H_um).tolil()
+                dA_dH[hm.nin, :] = 0.0
+                dA_dH = dA_dH.tocsr()
+
+                # Versão física (sem Dirichlet) para dq/dH
+                dA_dH_fisica = A_fisica.multiply(4.0 / H_um)
+
+            E  = 0.0
+            dE = 0.0
+
+            for _ in range(n_steps):
+                # --- Estado físico ---
+                rhs = np.concatenate([idt * w, idt * (hm.M @ v), b_p])
+                sol = solveG(rhs)
+                w   = sol[:n_m]
+                v   = sol[n_m:2*n_m]
+                p   = sol[2*n_m:]
+
+                qmem = h2 * (hm.U @ v)
+                pot  = float((p_adim - p) @ qmem)
+                E   += pot * dt
+
+                # --- Sensibilidades em relação a H ---
+                if calc_sens:
+                    rhs_s = np.concatenate([
+                        idt * sw,
+                        idt * (hm.M @ sv),
+                        -(idt * dA_dH) @ p     # <<< CORREÇÃO: G tem bloco idt*A(H) ⇒ dG/dH = idt·dA/dH
+                    ])
+                    sols   = solveG(rhs_s)
+                    sw     = sols[:n_m]
+                    sv     = sols[n_m:2*n_m]
+                    sp_vec = sols[2*n_m:]
+
+                    # dp[nin]/dH = 0: p[nin] prescrito não depende de H
+                    sp_vec[hm.nin] = 0.0
+
+                    # dP/dH = (p_in - p)·(h²·U·sv) - sp·(h²·U·v)
+                    qmem_s = h2 * (hm.U @ sv)
+                    dP = float((p_adim - p) @ qmem_s) - float(sp_vec @ qmem)
+                    dE += dP * dt
+
+            # --- Grandezas no instante final ---
+            V_f  = float(h2 * np.dot(hm.uns, w))
+            q_in = float((A_fisica[hm.nin, :] @ p).sum())
+
+            if calc_sens:
+                dV = float(h2 * np.dot(hm.uns, sw))
+                dq = float((dA_dH_fisica[hm.nin, :] @ p).sum()
+                        + (A_fisica[hm.nin, :]       @ sp_vec).sum())
+                return E, q_in, V_f, dE, dq, dV
+
+            return E, q_in, V_f
+
+        # ------------------------------------------------------------------
+        # VARREDURA EM TC  (H = 1000 μm fixo)
+        # ------------------------------------------------------------------
+        print("\nVarrendo TC ∈ [0, 250] °C ...")
+        TC_vec = np.linspace(0.0, 250.0, 30)
+        dTC    = 1.0
+
+        E_TC = []; q_TC = []; V_TC = []
+        dE_fw_TC = []; dE_ct_TC = []
+        dq_fw_TC = []; dq_ct_TC = []
+        dV_fw_TC = []; dV_ct_TC = []
+
+        for TC in TC_vec:
+            Al,  Af  = A_para_TC(TC)
+            Alf, Aff = A_para_TC(TC + dTC)
+            Alb, Afb = A_para_TC(TC - dTC)
+
+            E0, q0, V0 = _solver(Al,  Af)
+            Ef, qf, Vf = _solver(Alf, Aff)
+            Eb, qb, Vb = _solver(Alb, Afb)
+
+            E_TC.append(E0); q_TC.append(q0); V_TC.append(V0)
+            dE_fw_TC.append((Ef - E0) / dTC)
+            dE_ct_TC.append((Ef - Eb) / (2 * dTC))
+            dq_fw_TC.append((qf - q0) / dTC)
+            dq_ct_TC.append((qf - qb) / (2 * dTC))
+            dV_fw_TC.append((Vf - V0) / dTC)
+            dV_ct_TC.append((Vf - Vb) / (2 * dTC))
+
+        TC_vec   = np.array(TC_vec)
+        E_TC     = np.array(E_TC);   q_TC = np.array(q_TC);  V_TC = np.array(V_TC)
+        dE_fw_TC = np.array(dE_fw_TC); dE_ct_TC = np.array(dE_ct_TC)
+        dq_fw_TC = np.array(dq_fw_TC); dq_ct_TC = np.array(dq_ct_TC)
+        dV_fw_TC = np.array(dV_fw_TC); dV_ct_TC = np.array(dV_ct_TC)
+
+        # ------------------------------------------------------------------
+        # VARREDURA EM H  (TC = 125 °C fixo)
+        # ------------------------------------------------------------------
+        print("Varrendo H ∈ [500, 1500] μm ...")
+        H_vec = np.linspace(500.0, 1500.0, 30)
+        dH    = 1.0
+
+        E_H = []; q_H = []; V_H = []
+        dE_fw_H = []; dE_ct_H = []
+        dE_an_H = []; dq_an_H = []; dV_an_H = []
+        dq_fw_H = []; dV_fw_H = []
+
+        for H in H_vec:
+            Al,  Af  = A_para_H(H)
+            Alf, Aff = A_para_H(H + dH)
+            Alb, Afb = A_para_H(H - dH)
+
+            E0, q0, V0, dE_a, dq_a, dV_a = _solver(Al, Af, H_um=H)
+            Ef, qf, Vf = _solver(Alf, Aff)
+            Eb, _,  _  = _solver(Alb, Afb)
+
+            E_H.append(E0);  q_H.append(q0);  V_H.append(V0)
+            dE_fw_H.append((Ef - E0) / dH)
+            dE_ct_H.append((Ef - Eb) / (2 * dH))
+            dq_fw_H.append((qf - q0) / dH)
+            dV_fw_H.append((Vf - V0) / dH)
+            dE_an_H.append(dE_a)
+            dq_an_H.append(dq_a)
+            dV_an_H.append(dV_a)
+
+        H_vec    = np.array(H_vec)
+        E_H      = np.array(E_H);   q_H = np.array(q_H);  V_H = np.array(V_H)
+        dE_fw_H  = np.array(dE_fw_H);  dE_ct_H = np.array(dE_ct_H)
+        dE_an_H  = np.array(dE_an_H)
+        dq_fw_H  = np.array(dq_fw_H);  dq_an_H = np.array(dq_an_H)
+        dV_fw_H  = np.array(dV_fw_H);  dV_an_H = np.array(dV_an_H)
+
+        for H in H_vec:
+            Al,  Af  = A_para_H(H)
+            Alf, Aff = A_para_H(H + dH)
+            Alb, Afb = A_para_H(H - dH)
+
+            E0, q0, V0, dE_a, dq_a, dV_a = _solver(Al, Af, H_um=H)
+            Ef, qf, Vf = _solver(Alf, Aff)
+            Eb, _,  _  = _solver(Alb, Afb)
+
+            # ---- DIAGNÓSTICO: imprime só no primeiro ponto e para ----
+            print(f"\n--- DIAGNÓSTICO H={H:.1f} μm ---")
+            print(f"E0={E0:.6f}  Ef={Ef:.6f}  Eb={Eb:.6f}")
+            print(f"dE FWD = {(Ef-E0)/dH:.8f}")
+            print(f"dE CTD = {(Ef-Eb)/(2*dH):.8f}")
+            print(f"dE AN  = {dE_a:.8f}")
+            print(f"V0={V0:.8f}  Vf={Vf:.8f}  Vb={Vb:.8f}")
+            print(f"dV FWD = {(Vf-V0)/dH:.10f}")
+            print(f"dV CTD = {(Vf-Eb)/(2*dH):.10f}")
+            print(f"dV AN  = {dV_a:.10f}")
+            break  # remove após diagnóstico
+            # ---------------------------------------------------------
+
+        # ------------------------------------------------------------------
+        # GRÁFICOS
+        # ------------------------------------------------------------------
+        fig, axs = plt.subplots(3, 2, figsize=(15, 15))
+        fig.suptitle('EX 3.1 — Análise de Sensibilidade Paramétrica',
+                    fontsize=14, fontweight='bold')
+
+        # (0,0) Métricas vs TC
+        axs[0,0].plot(TC_vec, E_TC,  'r-',  label=r'$\mathcal{E}$')
+        axs[0,0].plot(TC_vec, q_TC,  'g-.', label=r'$q_{\rm inlet}$')
+        axs[0,0].plot(TC_vec, V_TC,  'b--', label=r'$V(t_f)$')
+        axs[0,0].set_title(r'Métricas vs $T_C$')
+        axs[0,0].set_xlabel(r'$T_C$ (°C)')
+        axs[0,0].legend(); axs[0,0].grid(True, linestyle=':')
+
+        # (0,1) Derivadas vs TC
+        axs[0,1].plot(TC_vec, dE_fw_TC, 'r-',  lw=3, alpha=0.6, label=r'FWD $\partial\mathcal{E}/\partial T_C$')
+        axs[0,1].plot(TC_vec, dE_ct_TC, 'r--', lw=2,             label=r'CTD $\partial\mathcal{E}/\partial T_C$')
+        axs[0,1].plot(TC_vec, dq_fw_TC, 'g-',  lw=3, alpha=0.6, label=r'FWD $\partial q/\partial T_C$')
+        axs[0,1].plot(TC_vec, dq_ct_TC, 'g--', lw=2,             label=r'CTD $\partial q/\partial T_C$')
+        axs[0,1].plot(TC_vec, dV_fw_TC, 'b-',  lw=3, alpha=0.6, label=r'FWD $\partial V/\partial T_C$')
+        axs[0,1].plot(TC_vec, dV_ct_TC, 'b--', lw=2,             label=r'CTD $\partial V/\partial T_C$')
+        axs[0,1].set_title(r'Derivadas vs $T_C$ (diferenças finitas)')
+        axs[0,1].set_xlabel(r'$T_C$ (°C)')
+        axs[0,1].legend(fontsize=7); axs[0,1].grid(True, linestyle=':')
+
+        # (1,0) Métricas vs H
+        axs[1,0].plot(H_vec, E_H,  'r-',  label=r'$\mathcal{E}$')
+        axs[1,0].plot(H_vec, q_H,  'g-.', label=r'$q_{\rm inlet}$')
+        axs[1,0].plot(H_vec, V_H,  'b--', label=r'$V(t_f)$')
+        axs[1,0].set_title(r'Métricas vs $H$')
+        axs[1,0].set_xlabel(r'$H$ (μm)')
+        axs[1,0].legend(); axs[1,0].grid(True, linestyle=':')
+
+        # (1,1) dE/dH: numérico vs analítico
+        axs[1,1].plot(H_vec, dE_fw_H, 'g-',  lw=4, alpha=0.5, label=r'FWD $\partial\mathcal{E}/\partial H$')
+        axs[1,1].plot(H_vec, dE_ct_H, 'g--', lw=2,             label=r'CTD $\partial\mathcal{E}/\partial H$')
+        axs[1,1].plot(H_vec, dE_an_H, 'r-',  lw=2,             label=r'Analítico (Eq. 6.17 adaptada)')
+        axs[1,1].set_title(r'$\partial\mathcal{E}/\partial H$: Numérico vs Analítico')
+        axs[1,1].set_xlabel(r'$H$ (μm)')
+        axs[1,1].legend(); axs[1,1].grid(True, linestyle=':')
+
+        # (2,0) dq/dH: numérico vs analítico
+        axs[2,0].plot(H_vec, dq_fw_H, 'm-',  lw=4, alpha=0.5, label=r'FWD $\partial q/\partial H$')
+        axs[2,0].plot(H_vec, dq_an_H, 'k--', lw=2,             label=r'Analítico $\partial q/\partial H$')
+        axs[2,0].set_title(r'$\partial q_{\rm inlet}/\partial H$: Numérico vs Analítico')
+        axs[2,0].set_xlabel(r'$H$ (μm)')
+        axs[2,0].legend(); axs[2,0].grid(True, linestyle=':')
+
+        # (2,1) dV/dH: numérico vs analítico
+        axs[2,1].plot(H_vec, dV_fw_H, 'c-',  lw=4, alpha=0.5, label=r'FWD $\partial V/\partial H$')
+        axs[2,1].plot(H_vec, dV_an_H, 'b--', lw=2,             label=r'Analítico $\partial V/\partial H$')
+        axs[2,1].set_title(r'$\partial V(t_f)/\partial H$: Numérico vs Analítico')
+        axs[2,1].set_xlabel(r'$H$ (μm)')
+        axs[2,1].legend(); axs[2,1].grid(True, linestyle=':')
 
         plt.tight_layout()
         plt.savefig("imagens/gêmeo digital/ex 3_1.png")
         plt.show()
 
-        return res_TC, res_H
+        return {
+            'TC': (TC_vec, E_TC, q_TC, V_TC,
+                dE_fw_TC, dE_ct_TC,
+                dq_fw_TC, dq_ct_TC,
+                dV_fw_TC, dV_ct_TC),
+            'H':  (H_vec, E_H, q_H, V_H,
+                dE_fw_H, dE_ct_H, dE_an_H,
+                dq_fw_H, dq_an_H,
+                dV_fw_H, dV_an_H)
+        }
 
     def ex_3_2(self, H_inicial: float = 1000.0, tol: float = 1e-5, max_iter: int = 50):
         H_atual = H_inicial
@@ -491,92 +773,6 @@ class GemeoDigital:
         print("Aviso: O número máximo de iterações foi atingido.")
         return H_atual
 
-    # =========================================================================
-    # EX 5: GERAÇÃO DE TABELAS PANDAS E ANIMAÇÃO SIMULTÂNEA 2D E 3D
-    # =========================================================================
-    def ex_5_analise_tabelas_e_animacao_completa(self):
-        print("\n" + "="*60)
-        print("EX 5: RELATÓRIO PANDAS E VISUALIZAÇÃO SÍNCRONA 2D / 3D")
-        print("="*60)
-
-        # 1. Geração da Tabela via Pandas Dataframe
-        print("[GD] Compilando dados estruturados para telemetria operacional...")
-        passos = 12
-        tempo_t = np.linspace(0, 5.0, passos)
-        vazoes, potencias, status_alarme = [], [], []
-
-        for t in tempo_t:
-            p_bomba = 5000.0 * (1.0 + 0.15 * np.sin(2.0 * np.pi * t))
-            v_atual = self._extrair_vazao(pressao_inlet=p_bomba)
-            vazoes.append(v_atual)
-            potencias.append(p_bomba * v_atual)
-            status_alarme.append("FALHA (CRÍTICO)" if v_atual < self.limite_critico else "NOMINAL")
-
-        df_telemetria = pd.DataFrame({
-            'Tempo (s)': tempo_t,
-            'Vazão Real (m³/s)': vazoes,
-            'Potência Bomba (W)': potencias,
-            'Status Operacional': status_alarme
-        })
-        print("\n" + "-"*65 + "\n      RELATÓRIO DE TELEMETRIA DINÂMICA DO GÊMEO DIGITAL\n" + "-"*65)
-        print(df_telemetria.to_string(index=False, float_format="%.4e"))
-        print("-"*65 + "\n")
-
-        # 2. Motor de Renderização Animada 2D e 3D Simultâneo
-        print("[GD] Inicializando malha 2D/3D compartilhada...")
-        N_spatial = 50
-        x = np.linspace(-0.015, 0.015, N_spatial)
-        y = np.linspace(-0.0075, 0.0075, N_spatial)
-        X, Y = np.meshgrid(x, y)
-        R_dist = np.sqrt(X**2 + Y**2)
-
-        fig = plt.figure(figsize=(14, 6))
-        ax_2d = fig.add_subplot(121)
-        ax_3d = fig.add_subplot(122, projection='3d')
-
-        def atualizar_quadro(frame):
-            ax_2d.clear()
-            ax_3d.clear()
-            
-            t_sim = frame * 0.08
-            # Campo de onda acoplado dinamicamente
-            Z = np.sin(180.0 * R_dist - 6.0 * t_sim) * np.exp(-60.0 * R_dist)
-            Z += 0.4 * np.exp(-300.0 * (X**2 + Y**2)) # Concentração central do reator
-            
-            # Painel da Esquerda: Projeção de Contornos 2D
-            cont_2d = ax_2d.contourf(X, Y, Z, levels=25, cmap='magma')
-            ax_2d.set_title(f"Campo Transiente 2D (t = {t_sim:.2f}s)", fontweight='bold')
-            ax_2d.set_xlabel("Eixo X (m)"); ax_2d.set_ylabel("Eixo Y (m)")
-            ax_2d.grid(True, alpha=0.3)
-            
-            # Painel da Direita: Deformação Estrutural/Térmica Real em 3D
-            surf_3d = ax_3d.plot_surface(X, Y, Z, cmap='magma', edgecolor='none', antialiased=True)
-            ax_3d.set_title("Superfície Dinâmica 3D", fontweight='bold')
-            ax_3d.set_xlabel("X (m)"); ax_3d.set_ylabel("Y (m)"); ax_3d.set_zlabel("Amplitude (w)")
-            ax_3d.set_zlim([-1.0, 1.5])
-            
-            return ax_2d, ax_3d
-
-        print("[GD] Disparando loops gráficos. Feche a janela de simulação para prosseguir.")
-        anim = animation.FuncAnimation(fig, atualizar_quadro, frames=60, interval=60, blit=False)
-        plt.tight_layout()
-        plt.show()
-
-    def plot_p_out_history(self):
-        if not hasattr(self, "hist_mono"):
-            raise ValueError("Histórico não encontrado. Execute ex_2 primeiro.")
-
-        t = self.hist_mono["t"]
-        p_out = self.hist_mono["p_out"]
-
-        plt.figure()
-        plt.plot(t[:len(p_out)], p_out)
-        plt.xlabel("Tempo [s]")
-        plt.ylabel("p_out")
-        plt.title("Histórico de pressão de saída (p_out)")
-        plt.grid(True)
-        plt.show()
-
 def plot_potencia(hist):
     t = np.array(hist['t'])
     P = np.array(hist['power'])
@@ -599,9 +795,9 @@ if __name__ == "__main__":
     gd = GemeoDigital()
     # gd.ex_1_1()
     # gd.ex_1_2()
-    # gd.ex_2()
+    gd.ex_2()
     # gd.ex_3_1()
-    gd.ex_3_2()
+    # gd.ex_3_2()
 
     hist, _ = gd.solver_transiente(0.01, 4.0)
     plot_potencia(hist)
